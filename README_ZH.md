@@ -6,30 +6,136 @@
 
 [English](./README.md) | [简体中文](./README_ZH.md)
 
-**面向 Vibe Coding 与现代全栈项目的中立可观测性护栏、零依赖 CLI 验证工具与“左脚踩右脚” AI 闭环 Agent Skills。**
-
-原生覆盖 **现代 Web 全栈（Vite 8 / React / TanStack / Hono / Better Auth / Oxc）**、**Cloudflare 全家桶（Workers / D1 / KV / Queues / R2）**、**高并发自建基建（Go / Gin / Caddy / Pigsty / Prometheus / `pgmq` / OpenTelemetry）**、**跨平台桌面与原生端（Electron / Wails v3 / Tauri 2 / Swift / Kotlin）**、**SSR 框架（Next.js / Nuxt / SvelteKit / Astro）** 以及 **Python + `uv` 数据抓取与自动化脚本**。
-
-兼容 **Antigravity**、**Claude Code**、**Codex**、**Cursor** 及所有支持开放 `SKILL.md` 规范的 AI 编程代理。
+**给你的 AI 编程助手装上线上眼睛。**
 
 ---
 
-## 3 秒免安装体验（`uvx` 一行命令）
+## 一、为什么要装生产环境监控？（故事的起点）
 
-甚至不用先安装 Agent Skills，零第三方运行时依赖，一行命令就能直接体检你手头的项目或验证线上部署：
+现在用 AI（Antigravity、Claude Code、Codex、Cursor）写产品，一个周末就能上线。
+
+**但产品一上线，你和你的 AI 就一起“瞎”了。**
+
+想象一下最真实的上线惨案：你辛苦发帖推广，来了 500 个真实访客，结果只有 3 个人注册、**0 个人付费**。你心里开始打鼓：*“是不是我这个点子根本没人要？”*
+
+可真相往往很残酷：**99% 遇到 Bug 的用户根本不会给你发反馈，他们只会默默关掉页面、再也不来。** 很多时候不是产品没人要，而是你的线上环境出了你完全看不见的故障：
+
+* **用户的 Safari 或手机微信打开直接白屏报错**（你自己电脑用 Chrome，完全复现不了）；
+* **手机小屏上弹窗把“立即支付”按钮挡住了**，用户狂点 5 下没反应，气得直接退出；
+* **90% 的人在注册第 2 步就卡住流失了**，你却花了一整周在疯狂改首页标题；
+* **凌晨 3 点服务器 500 或支付回调静默失败**，用户扣了钱却没开通会员。
+
+这就是**生产环境监控**真正不可替代的两大价值：
+1. **上线不再靠猜**：清楚看到“哪里崩了、影响了多少人、用户在哪一步卡住了”。
+2. **让 AI 从“瞎猜改代码”进化成“看真实证据自动修 Bug”**：当线上的报错、流失和卡点都结构化采集下来后，你的 AI 编程助手就能**亲自读取线上真实数据**，直接定位到出问题的源码行把 Bug 修掉，实现越用越好的自进化闭环。
+
+---
+
+## 二、30 秒看懂所有名词（像开一家实体店一样理解）
+
+如果你看到“可观测性”“Sentry”“PostHog”“Source Map”“反向代理”这些词就头大，把它想象成**你开了一家线下实体店**，30 秒全部秒懂：
+
+| 技术名词 | 说人话是什么？（实体店比喻） | 它帮你回答什么问题？ |
+| :--- | :--- | :--- |
+| **可观测性（Observability）** | 给店里装全套**监控摄像头 + 警报器 + 经营账本** | 产品上线后，内部健不健康、用户到底怎么用的？ |
+| **Sentry（错误监控）** | 店里的**故障报警器** | 哪个用户在什么浏览器/手机上白屏崩溃了？精确崩在源码第几行？ |
+| **PostHog（产品分析）** | 店里的**客流转化与回放系统** | 进来 100 个人，多少人注册、多少人付费、哪一步流失最多？（还自带录屏和 A/B 实验） |
+| **GA4** *(Google Analytics)* | 门口的**迎宾登记簿** | 用户是从 Google 搜索、X、小红书还是广告点进来的？ |
+| **Microsoft Clarity** | 免费的**点击热力图 + 监控录像** | 用户最爱点哪？有没有对着某个坏按钮狂点（**愤怒点击 / Rage Click**）或误点假按钮（**死点击 / Dead Click**）？ |
+| **Source Map（`.js.map`）** | 报错堆栈的**翻译密码本** | 前端代码上线会被压缩成乱码，传给 Sentry 才能还原真实报错行号；**但如果误留在公网，任何人都能直接扒走你的源码**。 |
+| **反向代理（`/ingest`）** | 挂在自家域名下的**收发室** | 30%–50% 科技用户装了广告拦截器（AdBlock），直连 `posthog.com` 会被拦掉；走自家域名转发就能稳稳收数。 |
+| **健康探针（`/api/health`）与结构化日志** | 后厨的**心跳脉搏 + 规范流水账** | 服务器直接 502 宕机或 SSL 证书过期时，网页脚本根本跑不起来；靠后台 JSON 日志和外部定时心跳才能第一时间告警。 |
+| **PII 脱敏（隐私保护）** | 录像时的**自动打码机** | 录屏和报错时自动遮掉密码、邮箱、Token，保护用户隐私，也避免因为给 GA4 传邮箱被封号。 |
+
+---
+
+## 三、那我直接跟 AI 说“帮我接 Sentry 和 PostHog”不行吗？
+
+这就是几乎所有 Vibe Coder 都踩过的坑——**直接裸问 AI 接监控，它会反复翻 5 个车**：
+
+1. **把网页拖卡死**：AI 把 PostHog 录屏、Clarity 录屏、Sentry 录屏一股脑全装上，浏览器同时跑多套页面监听，首屏变慢、掉帧。
+2. **装完等于白装（线上 0 数据）**：没配反向代理被 AdBlock 拦掉一半用户；或者配了 `/ingest` 却忘了在登录中间件里放行，结果全被 `307` 踢去 `/login`；或者把你自己 `localhost` 测试的脏数据全混进了线上报表。
+3. **一觉醒来收高额账单**：AI 随手写了个 `tracesSampleRate: 1.0`（100% 采样），或者写了个 React `useEffect` 死循环，一个晚上把免费额度打爆扣费。
+4. **隐私和源码裸奔**：录屏忘遮密码输入框、往 GA4 传用户邮箱（违反协议会被封号）、或者构建完忘删 `.js.map` 把源码直接暴露在公网。
+5. **非网页项目瞎套网页方案**：给桌面软件（Electron / Wails / Tauri）硬塞 GA4/Clarity（协议报错还会被当间谍软件差评）；在 Cloudflare Workers 里忘写 `ctx.waitUntil()` 导致服务端事件丢光；Python 抓取脚本 0 报错但抓回 0 条数据却没人知道。
+
+---
+
+## 四、`vibe-observability` 怎么解决？（给 AI 装眼睛的 3 步闭环）
+
+`vibe-observability` 把老司机踩过的坑焊成了 **Agent Skills**（兼容 Antigravity、Claude Code、Codex、Cursor），并自带 **3 个零依赖自动校验工具**——不只教 AI 怎么写，还用程序客观验收它写得对不对。
+
+```mermaid
+flowchart LR
+    A["1. 装眼睛\n（一句话让 AI 标准化接入）"] --> B["2. 验视力\n（静态体检 + 上线动态验活）"]
+    B --> C["3. 真实用户使用\n（产生报错 / 漏斗 / 愤怒点击）"]
+    C --> D["4. 拉回线上证据\n（Sentry / PostHog / Clarity / 日志）"]
+    D --> E["5. AI 查源码修 Bug\n（改完定指标验证效果）"]
+    E --> C
+```
+
+### 第 1 步 · 上线前，5 分钟给项目装上眼睛
+对你的 AI 编程助手说一句：
+> *“帮我用 `vibe-observability` 给这个项目装上生产监控。”*
+
+AI 会自动看懂你的项目形态（网站、营销页、Cloudflare Workers、Go 后端、桌面端还是 Python 抓取脚本），挑出最轻且不打架的组合，建好统一的埋点封装、反向代理、隐私脱敏和防爆费限制，最后自动跑一遍 **`vibe-obs audit`** 确认零高危隐患。
+
+### 第 2 步 · 上线后，3 秒钟验视力
+发完线上跑一条命令：
+```bash
+vibe-obs verify https://你的域名 --strict
+```
+它会真发 HTTP 请求验证：健康心跳是否正常、`/ingest` 反代有没有被登录页拦死、`.js.map` 源码有没有公网泄露。
+
+### 第 3 步 · 跑了一周后，让 AI 自己看病开药
+对你的 AI 说一句：
+> *“用 `vibe-observability-loop` 拉一下最近 7 天的线上数据，找出最影响用户的 3 个问题并修掉。”*
+
+AI 通过 MCP 或内置只读命令 `vibe-obs pull` 把真实报错、流失漏斗、愤怒点击（或服务器指标/脚本异常）拉回编辑器，直接定位到具体源码行写修复代码，并定好上线后的验证指标——**左脚踩右脚，越用越好**。
+
+---
+
+## 五、10 秒钟上手
+
+### A. 安装 Agent Skills（推荐）
+
+开箱支持 **Antigravity**、**Claude Code**、**Codex**、**Cursor**：
 
 ```bash
-# 1. 静态体检本地任意项目（自动检查 16 条高发可观测性隐患）
+# 最快通用安装方式
+npx skills add realchendahuang/vibe-observability
+```
+
+或克隆仓库后使用 `install.sh`：
+
+```bash
+git clone https://github.com/realchendahuang/vibe-observability.git
+cd vibe-observability
+
+./install.sh --target antigravity --symlink   # ~/.gemini/config/skills
+./install.sh --target claude --symlink        # ~/.claude/skills
+./install.sh --target codex --symlink         # ~/.codex/skills
+./install.sh --target cursor --symlink        # ~/.cursor/skills
+./install.sh --target all --symlink           # 一次性安装到所有全局目录
+```
+
+### B. 还不想装 Skill？先用 `uvx` 3 秒免费体检你的项目
+
+零第三方依赖、纯本地/只读运行，不用 clone 直接体验：
+
+```bash
+# 体检你手头的本地仓库（自动揪出 16 条高发监控坑）
 uvx --from git+https://github.com/realchendahuang/vibe-observability vibe-obs audit .
 
-# 2. 上线后 3 秒动态冒烟验活（揪出 /ingest 被登录拦截 307、.js.map 源码公网泄露）
-uvx --from git+https://github.com/realchendahuang/vibe-observability vibe-obs verify https://app.example.com
+# 验活你的线上网址（查健康探针、/ingest 被拦截、.js.map 源码泄露）
+uvx --from git+https://github.com/realchendahuang/vibe-observability vibe-obs verify https://你的域名
 
-# 3. 只读一键拉取近 7 天线上信号简报（Sentry + PostHog + Clarity + Prometheus/Pigsty + 本地作业）
+# 一键只读拉取线上信号简报（Sentry / PostHog / Clarity / Prometheus / 抓取作业）
 uvx --from git+https://github.com/realchendahuang/vibe-observability vibe-obs pull --days 7
 ```
 
-### 真实终端实战效果
+<details>
+<summary><strong>点击查看真实终端输出样例（audit &amp; verify）</strong></summary>
 
 ```text
 $ vibe-obs audit ./my-web-app --strict
@@ -37,7 +143,6 @@ Vibe Observability Audit — /workspace/my-web-app
 ====================================================================
 Files scanned : 48
 Providers     : sentry, posthog, ga4, clarity
-Stack hints   : vite, oxlint, backend
 Score         : 10/100  (CRITICAL=0 HIGH=3 MEDIUM=3 LOW=1 INFO=0)
 
 [HIGH] OBS-002: Dual session-replay conflict: PostHog Replay + Microsoft Clarity both active
@@ -54,39 +159,41 @@ $ vibe-obs verify https://app.example.com --strict
 [CRITICAL] LIVE-005: Public source maps exposed (1 file(s)) -> /assets/app.js.map
 ```
 
----
-
-## 为什么做这个项目？
-
-厂商官方插件只教你怎么装*自家* SDK，绝不会提醒你：同时开 PostHog 录屏 + Clarity + Sentry 录屏会把首屏卡死；在 Electron/Wails/Tauri 桌面端塞 GA4/Clarity 会坏协议并引发用户隐私反感；Cloudflare Workers 漏写 `ctx.waitUntil()` 会让服务端事件 100% 丢失；或者你用 Pigsty 时早就自带了 Prometheus + Grafana + Loki 没必要花冤枉钱买 APM。
-
-| 常见 Vibe Coding 踩坑 | `vibe-observability` 的工程化解法 |
-| :--- | :--- |
-| **双录屏性能税** — 多套 DOM Observer 拖垮首屏和 Core Web Vitals。 | **7 档按运行形态互斥的套餐（Profiles）**：确保同一页面只开一套录屏。 |
-| **跨端/边缘环境错配** — 桌面端硬装 GA4/Clarity；Workers 误用 `@sentry/node` 或漏 `ctx.waitUntil()`。 | **6 份按需加载的栈专属适配器**：按真实运行环境提供精准防坑规范。 |
-| **部署态隐形故障** — Auth Middleware 把 `/ingest` 307 跳去 `/login`，或 `.js.map` 公网泄露源码。 | **`vibe-obs verify`** 上线后真发请求检查 `/api/health`、`/ingest`、`/monitoring`、CSP 与 `.js.map`。 |
-| **AdBlock 丢数、隐私违规与账单爆炸** — 30%–50% 流量被拦；GA4 传 PII 封号；`useEffect` 死循环打爆额度。 | 同源反向代理（Hono/Workers、Caddy、框架 rewrites）、PII 脱敏、`oxlint` 封装护栏、客户端突发限流与采样预算。 |
-| **只喊口号的 AI 优化闭环** — 盯着噪音数据拍脑袋改代码，改完也不验收。 | 配套 **`vibe-observability-loop`** 用 **`vibe-obs pull`** / MCP 拉真实数据，穿透源码定根因，强制输出上线回归契约。 |
+</details>
 
 ---
 
-## 全链路数据驱动闭环
+## 六、硬核工程细节（按需展开）
 
-```mermaid
-flowchart LR
-    A["1. 按栈标准化接入\n(vibe-observability)"] --> B["2. 静态代码体检\n(vibe-obs audit)"]
-    B --> C["3. 部署与动态验活\n(vibe-obs verify)"]
-    C --> D["4. 拉取真实线上信号\n(vibe-obs pull / MCP)"]
-    D --> E["5. 源码归因与手术级修复\n(vibe-observability-loop)"]
-    E --> F["6. 上线回归验效\n(指标对比 + Feature Flag)"]
-    F --> C
-```
+以下内容采用**渐进式按需加载**——你的 AI 只有在识别到对应技术栈时才会读取，平时完全不浪费上下文。
 
----
+<details>
+<summary><strong>支持的全技术栈 &amp; 7 档互斥套餐矩阵（Web / Cloudflare / Go+Pigsty / 桌面与原生 / Python 脚本）</strong></summary>
 
-## 可复现量化对比基准（`evals/`）
+| 套餐 | 核心组合 | 适用场景 |
+| :--- | :--- | :--- |
+| **`core`** *（默认 Web）* | Sentry + PostHog + 结构化日志 & `/health` | Vite/React/TanStack/Hono、Next.js/Nuxt/Astro、SaaS MVP |
+| **`marketing`** | Sentry + GA4 + MS Clarity + `/health` | 落地页、SEO 内容站、Google 广告投流 |
+| **`full-deduped`** | Sentry + PostHog *（关录屏）* + GA4 + MS Clarity *（开录屏）* + 日志 | 既要产品漏斗/Feature Flag 又要广告归因与免费热力图 |
+| **`ai-app`** | `core` + LLM 遥测（`$ai_generation`、TTFT、Token、成本、反馈） | AI 工具、Copilot、Agent、RAG 产品 |
+| **`selfhosted-infra`** | Go `log/slog` + Sentry + `/metrics`（并入 Pigsty Prometheus/Grafana/Loki）+ Caddy `/ingest` + `pgmq` 堆积告警 | 独立服务器、Go + Gin + Docker + Caddy + Pigsty（`pgmq`/Valkey/RustFS）+ OpenTelemetry 逃生舱 |
+| **`desktop-native`** | 原生崩溃上报（`@sentry/electron` / `sentry-go` / `sentry` Rust / `sentry-cocoa`+`MetricKit` / `sentry-android`）+ 本地滚动日志 + 可关闭匿名事件 | Electron、Wails v3、Tauri 2、Swift（macOS/iOS）、Kotlin（Android）— **严禁 GA4/Clarity** |
+| **`batch-jobs`** | `structlog` JSON + Sentry Crons 死人开关 + Run Summary 与抓取量骤降告警 | Python + `uv` 抓取脚本、Ego Lite 自动化、定时 ETL |
 
-本地运行 `python3 evals/run_benchmark.py` 即可 100% 复现以下对比（常见无脑 AI 接入 vs 本项目 5 套自包含参考样板）：
+完整适配器与 5 套通过 100/100 审计的开箱样板均内置于 [`skills/vibe-observability/`](./skills/vibe-observability/)（100% 自包含）：
+- Vite 8 + React + TanStack（Router/Query/Start）+ Hono + Better Auth + Oxc（`oxlint` 封装规则）+ Web Vitals
+- Cloudflare Workers + Hono + `@sentry/cloudflare` + `ctx.waitUntil` + D1/KV/Queues DLQ/R2
+- Go + Gin + `log/slog` + Caddy 反代 + Pigsty + `pgmq` + OpenTelemetry 演进路线
+- Electron、Go + Wails v3 + SQLite、Rust Tauri 2、Swift（`OSLog`/MetricKit）、Kotlin
+- Python + `uv` 抓取与自动化脚本
+- Next.js、Nuxt、SvelteKit、Astro
+
+</details>
+
+<details>
+<summary><strong>可复现前后对比基准（无脑 AI 接入 vs <code>vibe-observability</code>）</strong></summary>
+
+本地运行 `python3 evals/run_benchmark.py` 即可 100% 复现：
 
 | 类别 | 场景 | 审计得分 | Critical/High | 触发规则 |
 | :--- | :--- | :---: | :---: | :--- |
@@ -99,112 +206,47 @@ flowchart LR
 | 优化后（`vibe-observability`） | 样板：`python-uv-job` | **100/100** | 0 | None (PASS) |
 | 优化后（`vibe-observability`） | 样板：`nextjs-app-router` | **100/100** | 0 | None (PASS) |
 
----
+</details>
 
-## 内置 3 个零依赖 CLI 工具（仅用 Python 3.9+ 标准库）
+<details>
+<summary><strong>CI 白名单配置（<code>.vibe-observability.json</code>）与仓库目录结构</strong></summary>
 
-全部工具既可通过 **`vibe-obs <子命令>`**（`uvx` 或包安装）调用，也可直接单独执行 `skills/*/scripts/*.py`。
+放进真实项目 CI 时，可通过 `--ignore OBS-006B,OBS-010` 或根目录 `.vibe-observability.json` 忽略合理的业务例外：
 
-1. **`audit`（`audit_observability.py`）** — 覆盖 `OBS-001`–`OBS-016`，支持 TS/JS、Vue、Svelte、Go、Python、Rust、Swift、Kotlin、Wrangler、Caddyfile、Oxc。
-   - 支持 CI 严格门禁（`--strict` / `--fail-on HIGH`）、`--json` 输出，以及通过 `--ignore OBS-006B,OBS-010` 或项目根 `.vibe-observability.json` 配置白名单：
-     ```json
-     {
-       "ignore": ["OBS-006B", "OBS-010"],
-       "exclude_paths": ["legacy/", "scripts/scratch/"]
-     }
-     ```
-2. **`verify`（`verify_live.py`）** — 上线后动态验活，检查首页与 HTTPS、`/api/health` 或 `/healthz`、`/ingest/static/array.js`（抓 302/307 登录跳转和 SPA HTML 兜底）、`/monitoring` Tunnel、公网 `.js.map` 源码泄露（`CRITICAL`）及 CSP 头。
-3. **`pull`（`pull_signals.py`）** — 严格只读信号聚合器，一键汇总 Sentry 未解决 Top Issues、PostHog HogQL 核心事件与 `$ai_generation` 延迟/Token、Microsoft Clarity 实时摩擦指标（Rage/Dead Clicks）、Prometheus/Pigsty PromQL 指标（宕机节点、`pgmq` 堆积与滞留时间）以及本地 Python 抓取 JSONL 异常——绝不输出 Token。
-
----
-
-## 7 档运行形态套餐矩阵
-
-| 套餐 | 核心组合 | 适用场景 |
-| :--- | :--- | :--- |
-| **`core`** *（默认 Web）* | Sentry + PostHog + 结构化日志 & `/health` | Vite/React/TanStack/Hono、Next.js/Nuxt、SaaS MVP |
-| **`marketing`** | Sentry + GA4 + MS Clarity + `/health` | 落地页、SEO 内容站、Google 广告投流 |
-| **`full-deduped`** | Sentry + PostHog *（关录屏）* + GA4 + MS Clarity *（开录屏）* + 日志 | 既要产品漏斗/Feature Flag 又要广告归因与免费热力图 |
-| **`ai-app`** | `core` + LLM 生成遥测（`$ai_generation`、TTFT、Token、成本、反馈） | AI 工具、Copilot、Agent、RAG 产品 |
-| **`selfhosted-infra`** | Go `log/slog` + Sentry + `/metrics`（并入 Pigsty Prometheus/Grafana/Loki）+ Caddy `/ingest` + `pgmq` 堆积告警 | 独立服务器、Go + Gin + Docker + Caddy + Pigsty（`pgmq`/Valkey/RustFS） |
-| **`desktop-native`** | 原生崩溃上报（`@sentry/electron` / `sentry-go` / `sentry` Rust / `sentry-cocoa`+`MetricKit` / `sentry-android`）+ 本地滚动诊断日志 + 可关闭匿名事件 | Electron、Wails v3、Tauri 2、Swift（macOS/iOS）、Kotlin（Android）— **严禁 GA4/Clarity** |
-| **`batch-jobs`** | `structlog` JSON + Sentry Crons 死人开关 + Run Summary 与抓取量骤降告警 | Python + `uv` 抓取脚本、Ego Lite 自动化、定时 ETL |
-
----
-
-## 安装 Agent Skills
-
-`skills/` 下的每个 Skill 目录均**完全自包含**（含参考文档、样板代码与零依赖脚本），拷贝或 CLI 安装均不丢文件。
-
-### 方式一：Clone 后运行 `install.sh`（推荐）
-
-```bash
-git clone https://github.com/realchendahuang/vibe-observability.git
-cd vibe-observability
-
-./install.sh --target antigravity --symlink   # ~/.gemini/config/skills
-./install.sh --target claude --symlink        # ~/.claude/skills
-./install.sh --target codex --symlink         # ~/.codex/skills
-./install.sh --target cursor --symlink        # ~/.cursor/skills
-./install.sh --target all --symlink           # 全部全局目录
-
-# 安装到单个项目的 .agents/skills
-./install.sh --target project --project-dir /path/to/your-app --copy
+```json
+{
+  "ignore": ["OBS-006B", "OBS-010"],
+  "exclude_paths": ["legacy/", "scripts/scratch/"]
+}
 ```
 
-### 方式二：通过 `skills` CLI 安装
-
-```bash
-npx skills add realchendahuang/vibe-observability
-```
-
----
-
-## 常用对话示例
-
-- **新项目一键拉满**：*“帮我用 `vibe-observability` 给这个项目把可观测性拉满，按技术栈选最合适的套餐，建统一封装层，接完用 `audit_observability.py --strict` 验收。”*
-- **老项目排雷体检**：*“用 `vibe-observability` 审计一下当前仓库的埋点和监控，修掉所有 CRITICAL/HIGH 级别的隐私、账单、反代或双录屏问题。”*
-- **上线后动态验活**：*“跑一下 `verify_live.py https://app.example.com --strict`，把拦截 `/ingest` 或泄露 `.js.map` 的配置修掉。”*
-- **启动 AI 自动优化闭环**：*“用 `vibe-observability-loop` 拉一下最近 7 天的 Sentry、PostHog 和 Clarity 信号，结合源码定位前 3 个根因，并输出带上线验证指标的修复方案。”*
-
----
-
-## 仓库目录结构
+仓库目录结构：
 
 ```text
 vibe-observability/
-├── pyproject.toml                                  # 零依赖 `vibe-obs` CLI 打包配置（支持 uvx）
-├── src/vibe_observability/cli.py                   # 单一事实来源 CLI 分发器
-├── install.sh                                      # 跨 Agent 安装脚本（软链 / 拷贝 / 卸载）
+├── pyproject.toml                        # 零依赖 `vibe-obs` CLI 打包配置（支持 uvx）
+├── src/vibe_observability/cli.py         # 统一 CLI 分发器（audit / verify / pull）
+├── install.sh                            # 跨 Agent 安装脚本
 ├── skills/
-│   ├── vibe-observability/                         # 完全自包含 Skill 1：接入、审计与动态验活
+│   ├── vibe-observability/               # Skill 1：装眼睛 + 防坑护栏 + 审计 + 验活
 │   │   ├── SKILL.md
-│   │   ├── references/                             # 通用护栏手册 + 6 份全栈适配器
-│   │   ├── examples/                               # 5 套即拷即用样板（审计全 100/100）
-│   │   └── scripts/
-│   │       ├── audit_observability.py              # 静态审计器（OBS-001..016）
-│   │       └── verify_live.py                      # 上线后动态验活器（LIVE-001..006）
-│   └── vibe-observability-loop/                    # 完全自包含 Skill 2：拉数 → 归因 → 修复 → 验效
+│   │   ├── references/                   # 通用护栏手册 + 6 份全栈适配器
+│   │   ├── examples/                     # 5 套自包含 100/100 样板
+│   │   └── scripts/                      # audit_observability.py & verify_live.py
+│   └── vibe-observability-loop/          # Skill 2：拉取真实证据 → 定位源码 → 修完验效
 │       ├── SKILL.md
-│       ├── references/                             # MCP/API 接入、根因诊断手册、回归验效契约
-│       └── scripts/
-│           └── pull_signals.py                     # 只读信号拉取器（Sentry/PostHog/Clarity/Prometheus/Job）
-├── evals/                                          # 可复现的前后对比基准测试
-├── tests/                                          # 零警告单测、本地 Mock HTTP 与 CLI 测试
-├── CONTRIBUTING.md / SECURITY.md / CHANGELOG.md
+│       ├── references/                   # MCP/API 指南、根因手册、回归契约
+│       └── scripts/                      # pull_signals.py（Sentry/PostHog/Clarity/Prometheus/作业）
+├── evals/                                # 可复现前后对比基准
+└── tests/                                # 16 项严格零警告测试
 ```
+
+</details>
 
 ---
 
-## 本地测试与安全说明
+## 参与贡献、安全说明与开源协议
 
-```bash
-python3 -W error -m unittest discover -s tests -v
-python3 evals/run_benchmark.py
-```
-
-详见 [CONTRIBUTING.md](./CONTRIBUTING.md)、[SECURITY.md](./SECURITY.md) 与 [CHANGELOG.md](./CHANGELOG.md)。
-
-## 开源协议
-
-[MIT](./LICENSE)
+* 本地测试：`python3 -W error -m unittest discover -s tests -v`
+* 相关文档：[CONTRIBUTING.md](./CONTRIBUTING.md) · [SECURITY.md](./SECURITY.md) · [CHANGELOG.md](./CHANGELOG.md)
+* 协议：[MIT](./LICENSE)
