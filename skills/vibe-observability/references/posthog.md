@@ -6,9 +6,11 @@ replay (when not delegated to Clarity), and LLM observability.
 
 ## 1. Environment Variables
 
+Use your framework's browser prefix (`VITE_`, `NEXT_PUBLIC_`, `PUBLIC_`, etc.):
+
 ```env
-NEXT_PUBLIC_POSTHOG_KEY=
-NEXT_PUBLIC_POSTHOG_HOST=https://us.i.posthog.com
+<PUBLIC_PREFIX>_POSTHOG_KEY=
+<PUBLIC_PREFIX>_POSTHOG_HOST=https://us.i.posthog.com
 # For EU cloud: https://eu.i.posthog.com
 # Prefer a first-party proxy path in the browser: /ingest
 ```
@@ -21,7 +23,7 @@ Key settings that prevent noisy data, bloated bills, and broken SPA tracking:
 posthog.init(key, {
   // Prefer same-origin reverse proxy '/ingest' to bypass AdBlockers
   api_host: "/ingest",
-  ui_host: process.env.NEXT_PUBLIC_POSTHOG_HOST || "https://us.posthog.com",
+  ui_host: env.POSTHOG_HOST || "https://us.posthog.com",
 
   // Massive cost saver: only create person profiles for identified users
   // (up to 4x cheaper for anonymous landing-page traffic)

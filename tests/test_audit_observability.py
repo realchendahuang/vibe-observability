@@ -166,6 +166,41 @@ export const config = {
             self.assertIsNone(report["score"])
             self.assertIn("N/A (not instrumented yet)", audit_observability.render_markdown_report(report))
 
+    def test_ignore_rules_via_config_and_cli_and_exclude_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._write_files(
+                root,
+                {
+                    ".vibe-observability.json": json.dumps(
+                        {
+                            "ignore": ["OBS-003"],
+                            "exclude_paths": ["legacy/"],
+                        }
+                    ),
+                    "src/sentry.ts": "const isProd = process.env.NODE_ENV === 'production'; Sentry.init({ tracesSampleRate: 1.0, sendDefaultPii: false, enabled: isProd });",
+                    "legacy/old.ts": "Sentry.init({ sendDefaultPii: true });",
+                },
+            )
+            report = audit_observability.audit_project(root)
+            ids = {f["id"] for f in report["findings"]}
+            self.assertNotIn("OBS-003", ids)  # ignored via .vibe-observability.json
+            self.assertNotIn("OBS-004", ids)  # legacy/ excluded
+            self.assertIn("OBS-003", report["suppressed_findings"])
+            self.assertEqual(report["score"], 100)
+
+            # Also verify --ignore CLI flag works cleanly
+            self._write_files(root, {"src/sentry.ts": "Sentry.init({ tracesSampleRate: 1.0, sendDefaultPii: true });"})
+            proc = subprocess.run(
+                [sys.executable, str(AUDIT_SCRIPT), str(root), "--ignore", "OBS-004", "--strict", "--json"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+            payload = json.loads(proc.stdout)
+            self.assertEqual(payload["summary"]["HIGH"], 0)
+
 
 if __name__ == "__main__":
     unittest.main()

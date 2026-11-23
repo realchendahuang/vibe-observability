@@ -39,6 +39,34 @@ class _MockSignalAPI(http.server.BaseHTTPRequestHandler):
                 ).encode("utf-8")
             )
             return
+
+        if self.path.startswith("/clarity/live-insights"):
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(
+                json.dumps(
+                    [
+                        {"metricName": "RageClickCount", "information": [{"sessionsCount": "14", "pagesPercentage": "3.2"}]},
+                        {"metricName": "DeadClickCount", "information": [{"sessionsCount": "29"}]},
+                    ]
+                ).encode("utf-8")
+            )
+            return
+
+        if self.path.startswith("/api/v1/query"):
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(
+                json.dumps(
+                    {
+                        "status": "success",
+                        "data": {"resultType": "vector", "result": [{"metric": {"queue": "emails"}, "value": [1700000000, "42"]}]},
+                    }
+                ).encode("utf-8")
+            )
+            return
         self.send_response(404)
         self.end_headers()
 
@@ -112,6 +140,10 @@ class TestPullSignals(unittest.TestCase):
                 "POSTHOG_PERSONAL_API_KEY": "phx_super_secret_key_do_not_print",
                 "POSTHOG_PROJECT_ID": "99",
                 "POSTHOG_HOST": f"http://127.0.0.1:{self.port}",
+                "CLARITY_API_TOKEN": "clarity_super_secret_token_do_not_print",
+                "CLARITY_API_URL": f"http://127.0.0.1:{self.port}/clarity/live-insights",
+                "PROMETHEUS_URL": f"http://127.0.0.1:{self.port}",
+                "PROMETHEUS_BEARER_TOKEN": "prom_super_secret_token_do_not_print",
             }
 
             proc = subprocess.run(
@@ -130,6 +162,10 @@ class TestPullSignals(unittest.TestCase):
             self.assertEqual(payload["sentry"]["issues"][0]["short_id"], "APP-42")
             self.assertEqual(payload["posthog"]["status"], "ok")
             self.assertEqual(payload["posthog"]["ai_generations"][0]["model"], "gemini-2.5-flash")
+            self.assertEqual(payload["clarity"]["status"], "ok")
+            self.assertEqual(payload["clarity"]["metrics"][0]["metric"], "RageClickCount")
+            self.assertEqual(payload["prometheus"]["status"], "ok")
+            self.assertEqual(payload["prometheus"]["queries"]["targets_down"]["samples"][0]["value"], "42")
             self.assertEqual(payload["jobs"]["jobs"]["xhs_sync"]["degraded"], 1)
 
     def test_graceful_skip_when_unconfigured(self) -> None:

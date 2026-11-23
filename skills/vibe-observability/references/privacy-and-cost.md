@@ -8,7 +8,8 @@ overnight due to an accidental client render loop.
 
 - **Default OFF in `development` and `test`**: Browser and server telemetry
   must remain disabled on `localhost` / CI unless explicitly opted in via
-  `NEXT_PUBLIC_OBSERVABILITY_DEBUG=true` (or `OBSERVABILITY_DEBUG=true`).
+  `OBSERVABILITY_DEBUG=true` (or your framework's public prefix such as
+  `VITE_OBSERVABILITY_DEBUG=true` / `NEXT_PUBLIC_OBSERVABILITY_DEBUG=true`).
 - **Separate Staging vs Production**: Always tag `environment` (`production`,
   `preview`, `staging`) and prefer separate Sentry/PostHog projects or explicit
   environment filters so PR previews never pollute conversion funnels.

@@ -1,0 +1,40 @@
+name: Bug Report / Auditor False Positive
+description: Report a bug in a CLI tool, installer, or a false positive / false negative in audit_observability.py
+labels: ["bug"]
+body:
+  - type: dropdown
+    id: component
+    attributes:
+      label: Affected Component
+      options:
+        - audit_observability.py (Static Auditor)
+        - verify_live.py (Live Smoke Verifier)
+        - pull_signals.py (Signal Puller)
+        - vibe-obs CLI / uvx packaging
+        - install.sh
+        - Skill instructions / references / examples
+    validations:
+      required: true
+  - type: input
+    id: rule_id
+    attributes:
+      label: Rule ID (if applicable)
+      placeholder: e.g. OBS-002, LIVE-003
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: Describe the bug or false positive clearly. Include a minimal sanitized code snippet if reporting an auditor issue.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      placeholder: e.g. macOS 15, Python 3.12, Antigravity / Claude Code

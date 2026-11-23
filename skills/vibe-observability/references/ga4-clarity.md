@@ -6,9 +6,11 @@ PostHog replay disabled).
 
 ## 1. Environment Variables
 
+Use your framework's browser prefix (`VITE_`, `NEXT_PUBLIC_`, `PUBLIC_`, etc.):
+
 ```env
-NEXT_PUBLIC_GA_MEASUREMENT_ID=   # e.g. G-XXXXXXXXXX
-NEXT_PUBLIC_CLARITY_PROJECT_ID=  # e.g. abcd1234ef
+<PUBLIC_PREFIX>_GA_MEASUREMENT_ID=   # e.g. G-XXXXXXXXXX
+<PUBLIC_PREFIX>_CLARITY_PROJECT_ID=  # e.g. abcd1234ef
 ```
 
 ## 2. Google Analytics 4 (GA4) Best Practices

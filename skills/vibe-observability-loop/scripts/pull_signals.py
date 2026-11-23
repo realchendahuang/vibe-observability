@@ -5,10 +5,12 @@ Zero external dependencies (Python 3.9+ stdlib only).
 Safely fetches compact, AI-ready summaries from whichever sources are configured:
   - Sentry REST API (top unresolved issues sorted by affected users)
   - PostHog HogQL API (top event volumes + recent AI generation latency/tokens)
+  - Microsoft Clarity Data Export API (live insights: Rage Clicks, Dead Clicks, Quick Backs)
+  - Prometheus / Pigsty HTTP API (read-only PromQL checks: down targets, pgmq backlog, custom queries)
   - Local Python/cron job JSONL run summaries (status counts + anomalies)
 
 Security rules:
-  - Strictly read-only endpoints (Sentry GET issues, PostHog HogQL SELECT)
+  - Strictly read-only endpoints (GET issues/insights/query, HogQL SELECT)
   - Never prints API tokens to stdout or stderr
   - Gracefully skips unconfigured sources without crashing
 """
@@ -25,7 +27,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-USER_AGENT = "vibe-observability-loop/0.2"
+USER_AGENT = "vibe-observability-loop/0.3"
 
 
 def _http_json(
@@ -70,6 +72,7 @@ def pull_sentry_issues(days: int, limit: int, timeout: float = 12.0) -> Dict[str
     try:
         raw = _http_json(url, headers={"Authorization": f"Bearer {token}"}, timeout=timeout)
     except urllib.error.HTTPError as exc:
+        exc.close()
         return {"status": "error", "reason": f"Sentry API HTTP {exc.code}", "issues": []}
     except Exception as exc:  # noqa: BLE001
         return {"status": "error", "reason": f"Sentry request failed: {exc}", "issues": []}
@@ -123,6 +126,7 @@ def pull_posthog_signals(days: int, limit: int, timeout: float = 12.0) -> Dict[s
     try:
         ev_resp = _http_json(url, headers=headers, method="POST", payload=top_events_query, timeout=timeout)
     except urllib.error.HTTPError as exc:
+        exc.close()
         return {"status": "error", "reason": f"PostHog API HTTP {exc.code}", "top_events": [], "ai_generations": None}
     except Exception as exc:  # noqa: BLE001
         return {"status": "error", "reason": f"PostHog request failed: {exc}", "top_events": [], "ai_generations": None}
@@ -133,7 +137,6 @@ def pull_posthog_signals(days: int, limit: int, timeout: float = 12.0) -> Dict[s
         if isinstance(row, list) and len(row) >= 3
     ]
 
-    # Optional LLM generation summary if $ai_generation exists
     ai_summary = None
     if any(e["event"] == "$ai_generation" for e in top_events):
         ai_query = {
@@ -166,6 +169,100 @@ def pull_posthog_signals(days: int, limit: int, timeout: float = 12.0) -> Dict[s
             ai_summary = None
 
     return {"status": "ok", "top_events": top_events, "ai_generations": ai_summary}
+
+
+def pull_clarity_signals(days: int, timeout: float = 12.0) -> Dict[str, Any]:
+    token = os.getenv("CLARITY_API_TOKEN", "").strip()
+    base_url = os.getenv(
+        "CLARITY_API_URL",
+        "https://www.clarity.ms/export-data/api/v1/project-live-insights",
+    ).rstrip("?")
+
+    if not token:
+        return {
+            "status": "skipped",
+            "reason": "Set CLARITY_API_TOKEN (Clarity Data Export read-only token) to enable Microsoft Clarity pull.",
+            "metrics": [],
+        }
+
+    # Clarity Export API supports 1, 2, or 3 days
+    num_days = max(1, min(3, int(days)))
+    params = urllib.parse.urlencode({"numOfDays": str(num_days)})
+    url = f"{base_url}?{params}"
+
+    try:
+        raw = _http_json(url, headers={"Authorization": f"Bearer {token}"}, timeout=timeout)
+    except urllib.error.HTTPError as exc:
+        exc.close()
+        return {"status": "error", "reason": f"Clarity API HTTP {exc.code}", "metrics": []}
+    except Exception as exc:  # noqa: BLE001
+        return {"status": "error", "reason": f"Clarity request failed: {exc}", "metrics": []}
+
+    focus = {"DeadClickCount", "RageClickCount", "QuickbackClick", "ScriptErrorCount", "Traffic", "ScrollDepth"}
+    metrics: List[Dict[str, Any]] = []
+    if isinstance(raw, list):
+        for entry in raw:
+            if not isinstance(entry, dict):
+                continue
+            name = str(entry.get("metricName", ""))
+            if not focus or name in focus or len(metrics) < 8:
+                info = entry.get("information", [])
+                metrics.append({"metric": name, "information": info[:5] if isinstance(info, list) else info})
+
+    return {"status": "ok", "num_days": num_days, "metrics": metrics}
+
+
+def pull_prometheus_signals(timeout: float = 12.0) -> Dict[str, Any]:
+    base_url = os.getenv("PROMETHEUS_URL", "").strip().rstrip("/")
+    token = os.getenv("PROMETHEUS_BEARER_TOKEN", "").strip()
+    custom_queries_raw = os.getenv("PROMETHEUS_QUERIES", "").strip()
+
+    if not base_url:
+        return {
+            "status": "skipped",
+            "reason": "Set PROMETHEUS_URL (e.g. Pigsty Prometheus/VictoriaMetrics endpoint) to enable infra metrics pull.",
+            "queries": {},
+        }
+
+    queries: Dict[str, str] = {
+        "targets_down": "count(up == 0)",
+        "pgmq_max_age_s": "max(pgmq_oldest_msg_age_sec)",
+        "pgmq_total_queued": "sum(pgmq_queue_length)",
+    }
+    if custom_queries_raw:
+        try:
+            parsed = json.loads(custom_queries_raw)
+            if isinstance(parsed, dict):
+                queries = {str(k): str(v) for k, v in parsed.items()}
+        except json.JSONDecodeError:
+            pass
+
+    headers: Dict[str, str] = {}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+
+    results: Dict[str, Any] = {}
+    errors: List[str] = []
+    for name, expr in queries.items():
+        url = f"{base_url}/api/v1/query?{urllib.parse.urlencode({'query': expr})}"
+        try:
+            resp = _http_json(url, headers=headers, timeout=timeout)
+            data = resp.get("data", {}).get("result", []) if isinstance(resp, dict) else []
+            compact = [
+                {"metric": item.get("metric", {}), "value": item.get("value", [None, None])[1]}
+                for item in data[:10]
+                if isinstance(item, dict)
+            ]
+            results[name] = {"expr": expr, "samples": compact}
+        except urllib.error.HTTPError as exc:
+            exc.close()
+            errors.append(f"{name}: HTTP {exc.code}")
+        except Exception as exc:  # noqa: BLE001
+            errors.append(f"{name}: {exc}")
+
+    if not results and errors:
+        return {"status": "error", "reason": "; ".join(errors), "queries": {}}
+    return {"status": "ok", "queries": results, "errors": errors}
 
 
 def pull_job_history(history_path: Optional[Path], limit: int) -> Dict[str, Any]:
@@ -242,9 +339,33 @@ def render_markdown(bundle: Dict[str, Any]) -> str:
                 )
     lines.append("")
 
+    clarity = bundle["clarity"]
+    if clarity["status"] != "skipped":
+        lines.append(f"## 3. Microsoft Clarity Insights ({clarity['status']})")
+        if clarity["status"] != "ok":
+            lines.append(f"- {clarity['reason']}")
+        elif not clarity["metrics"]:
+            lines.append("- No Clarity metrics returned.")
+        else:
+            for m in clarity["metrics"]:
+                lines.append(f"- **{m['metric']}**: `{json.dumps(m['information'], ensure_ascii=False)[:160]}`")
+        lines.append("")
+
+    prom = bundle["prometheus"]
+    if prom["status"] != "skipped":
+        lines.append(f"## 4. Prometheus / Pigsty Infra ({prom['status']})")
+        if prom["status"] != "ok":
+            lines.append(f"- {prom['reason']}")
+        else:
+            for qname, qdata in prom["queries"].items():
+                samples = qdata.get("samples", [])
+                val_str = ", ".join(str(s["value"]) for s in samples) if samples else "(no series)"
+                lines.append(f"- **{qname}** (`{qdata['expr']}`): `{val_str}`")
+        lines.append("")
+
     jobs = bundle["jobs"]
     if jobs["status"] != "skipped":
-        lines.append(f"## 3. Local Automation / Scraper Jobs ({jobs['status']})")
+        lines.append(f"## 5. Local Automation / Scraper Jobs ({jobs['status']})")
         if jobs["status"] != "ok":
             lines.append(f"- {jobs['reason']}")
         else:
@@ -262,7 +383,7 @@ def render_markdown(bundle: Dict[str, Any]) -> str:
 
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Pull compact read-only production signals from Sentry, PostHog, and local job logs for AI diagnosis."
+        description="Pull compact read-only production signals from Sentry, PostHog, Clarity, Prometheus/Pigsty, and local job logs."
     )
     parser.add_argument("--days", type=int, default=7, help="Lookback window in days (default: 7)")
     parser.add_argument("--limit", type=int, default=15, help="Max items per source (default: 15)")
@@ -275,6 +396,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         "window_days": args.days,
         "sentry": pull_sentry_issues(days=args.days, limit=args.limit, timeout=args.timeout),
         "posthog": pull_posthog_signals(days=args.days, limit=args.limit, timeout=args.timeout),
+        "clarity": pull_clarity_signals(days=args.days, timeout=args.timeout),
+        "prometheus": pull_prometheus_signals(timeout=args.timeout),
         "jobs": pull_job_history(args.job_history, limit=args.limit),
     }
 

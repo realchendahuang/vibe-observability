@@ -23,6 +23,15 @@ export SENTRY_PROJECT="your-project-slug"
 export POSTHOG_PERSONAL_API_KEY="phx_..."
 export POSTHOG_PROJECT_ID="12345"
 export POSTHOG_HOST="https://us.posthog.com" # or https://eu.posthog.com
+
+# Microsoft Clarity (Data Export read-only token; supports numOfDays=1..3)
+export CLARITY_API_TOKEN="..."
+
+# Prometheus / Pigsty (optional read-only PromQL queries)
+export PROMETHEUS_URL="http://127.0.0.1:9090"
+# Optional bearer token & custom JSON query map:
+# export PROMETHEUS_BEARER_TOKEN="..."
+# export PROMETHEUS_QUERIES='{"targets_down":"count(up == 0)","pgmq_age":"max(pgmq_oldest_msg_age_sec)"}'
 ```
 
 Run the puller to generate a compact Markdown or JSON brief:

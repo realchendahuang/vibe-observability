@@ -169,16 +169,57 @@ def is_test_or_example_file(rel_path: str) -> bool:
     return ".test." in name or ".spec." in name or name.startswith("test_") or name.endswith("_test.go")
 
 
-def collect_files(root: Path) -> Tuple[List[Path], List[Path]]:
+def load_project_config(root: Path) -> Tuple[Set[str], Set[str]]:
+    """Load optional `.vibe-observability.json` ignore rules and excluded path prefixes."""
+    cfg_path = root / ".vibe-observability.json"
+    ignored_rules: Set[str] = set()
+    exclude_paths: Set[str] = set()
+    if not cfg_path.is_file():
+        return ignored_rules, exclude_paths
+    try:
+        data = json.loads(cfg_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return ignored_rules, exclude_paths
+    if isinstance(data, dict):
+        for item in data.get("ignore", []) or []:
+            if isinstance(item, str) and item.strip():
+                ignored_rules.add(item.strip().upper())
+        for item in data.get("exclude_paths", []) or []:
+            if isinstance(item, str) and item.strip():
+                exclude_paths.add(item.strip().replace("\\", "/").lstrip("./"))
+    return ignored_rules, exclude_paths
+
+
+def is_excluded_path(rel_path: str, exclude_paths: Set[str]) -> bool:
+    if not exclude_paths:
+        return False
+    norm = rel_path.replace("\\", "/").lstrip("./")
+    for prefix in exclude_paths:
+        clean_prefix = prefix.rstrip("/")
+        if norm == clean_prefix or norm.startswith(clean_prefix + "/"):
+            return True
+    return False
+
+
+def collect_files(root: Path, exclude_paths: Set[str] | None = None) -> Tuple[List[Path], List[Path]]:
     code_files: List[Path] = []
     config_files: List[Path] = []
+    excludes = exclude_paths or set()
 
     for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
+        rel_dir = Path(dirpath).relative_to(root).as_posix()
+        dirnames[:] = [
+            d
+            for d in dirnames
+            if d not in SKIP_DIRS and not is_excluded_path(f"{rel_dir}/{d}" if rel_dir != "." else d, excludes)
+        ]
         for filename in filenames:
             if filename.endswith(".min.js") or filename.endswith(".map"):
                 continue
             path = Path(dirpath) / filename
+            rel = path.relative_to(root).as_posix()
+            if is_excluded_path(rel, excludes):
+                continue
             if filename in CONFIG_FILENAMES or filename.startswith("Caddyfile"):
                 config_files.append(path)
             if path.suffix.lower() in CODE_EXTENSIONS:
@@ -212,9 +253,11 @@ def parse_env_example(root: Path) -> Tuple[bool, Set[str]]:
     return found_file, found_vars
 
 
-def audit_project(root: Path) -> Dict[str, object]:
+def audit_project(root: Path, cli_ignore: Set[str] | None = None) -> Dict[str, object]:
     root = root.resolve()
-    code_files, config_files = collect_files(root)
+    cfg_ignore, exclude_paths = load_project_config(root)
+    ignored_rules = cfg_ignore | {r.strip().upper() for r in (cli_ignore or set()) if r.strip()}
+    code_files, config_files = collect_files(root, exclude_paths=exclude_paths)
 
     file_contents: Dict[str, str] = {}
     for p in sorted(set(code_files + config_files)):
@@ -683,6 +726,8 @@ def audit_project(root: Path) -> Dict[str, object]:
             )
         )
 
+    suppressed_ids = sorted({f.id for f in findings if f.id.upper() in ignored_rules})
+    findings = [f for f in findings if f.id.upper() not in ignored_rules]
     findings.sort(key=lambda f: (-SEVERITY_RANK[f.severity], f.id))
     instrumented = any(providers.values())
     score = max(0, 100 - sum(SEVERITY_PENALTY[f.severity] for f in findings)) if instrumented else None
@@ -704,6 +749,8 @@ def audit_project(root: Path) -> Dict[str, object]:
             "structured_logger": has_structured_logger,
             "health_route": has_health_route,
         },
+        "ignored_rules": sorted(ignored_rules),
+        "suppressed_findings": suppressed_ids,
         "score": score,
         "summary": {
             sev: sum(1 for f in findings if f.severity == sev)
@@ -726,6 +773,8 @@ def render_markdown_report(report: Dict[str, object]) -> str:
     lines.append(f"Files scanned : {report['files_scanned']}")
     lines.append(f"Providers     : {', '.join(providers)}")
     lines.append(f"Stack hints   : {', '.join(active_stack) if active_stack else '(generic)'}")
+    if report.get("ignored_rules"):
+        lines.append(f"Ignored rules : {', '.join(report['ignored_rules'])}")
     lines.append(
         f"Score         : {score_str}  "
         f"(CRITICAL={summary['CRITICAL']} HIGH={summary['HIGH']} "
@@ -766,6 +815,12 @@ def main(argv: List[str] | None = None) -> int:
         action="store_true",
         help="Shorthand for --fail-on HIGH",
     )
+    parser.add_argument(
+        "--ignore",
+        action="append",
+        default=[],
+        help="Comma-separated rule IDs to ignore (e.g. --ignore OBS-006B,OBS-010); merges with .vibe-observability.json",
+    )
     args = parser.parse_args(argv)
 
     target = Path(args.path)
@@ -773,7 +828,13 @@ def main(argv: List[str] | None = None) -> int:
         print(f"Error: target path is not an existing directory: {target}", file=sys.stderr)
         return 2
 
-    report = audit_project(target)
+    cli_ignore: Set[str] = set()
+    for raw in args.ignore:
+        for item in raw.split(","):
+            if item.strip():
+                cli_ignore.add(item.strip().upper())
+
+    report = audit_project(target, cli_ignore=cli_ignore)
 
     if args.as_json:
         print(json.dumps(report, indent=2, ensure_ascii=False))

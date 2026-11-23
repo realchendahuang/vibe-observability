@@ -1,0 +1,25 @@
+name: New Stack Adapter / Rule Proposal
+description: Propose support for another framework, runtime, or observability guardrail rule
+labels: ["enhancement"]
+body:
+  - type: input
+    id: stack_name
+    attributes:
+      label: Target Stack or Rule Name
+      placeholder: e.g. Remix / React Router v7, Flutter, Ruby on Rails, or OBS-017
+    validations:
+      required: true
+  - type: textarea
+    id: pitfalls
+    attributes:
+      label: Real Production Pitfalls to Guard Against
+      description: What breaks most often when AI agents wire observability into this stack?
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Recommended Best Practice
+      description: Outline the minimal, privacy-safe, cost-bounded setup you'd expect the skill or auditor to enforce.
+    validations:
+      required: true

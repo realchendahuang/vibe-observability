@@ -17,8 +17,20 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Run full unit, mock-HTTP & skill self-containment tests
+      - name: Run full zero-warning test suite
         run: python3 -W error -m unittest discover -s tests -v
+
+      - name: Run reproducible benchmark
+        run: python3 evals/run_benchmark.py
 
       - name: Verify install.sh dry-run
         run: bash ./install.sh --target all --dry-run
+
+      - name: Verify wheel packaging and installed vibe-obs CLI
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install .
+          vibe-obs version
+          vibe-obs audit skills/vibe-observability/examples/vite-tanstack-hono --strict
+          vibe-obs verify --help > /dev/null
+          vibe-obs pull --help > /dev/null

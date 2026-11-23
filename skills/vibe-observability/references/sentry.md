@@ -5,12 +5,14 @@ lightweight performance tracing across frontend and backend.
 
 ## 1. Environment Variables
 
+Use your frontend framework's public prefix (`VITE_` for Vite, `NEXT_PUBLIC_`
+for Next.js, `PUBLIC_` for Astro/SvelteKit, `NUXT_PUBLIC_` for Nuxt):
+
 ```env
 # Public (browser-safe, DSN is write-only)
-NEXT_PUBLIC_SENTRY_DSN=
-# or VITE_SENTRY_DSN=
+<PUBLIC_PREFIX>_SENTRY_DSN=
 
-# Server / Build-time only (NEVER expose with NEXT_PUBLIC_ or VITE_)
+# Server / Build-time only (NEVER expose with a public browser prefix)
 SENTRY_DSN=
 SENTRY_ORG=
 SENTRY_PROJECT=
@@ -23,13 +25,13 @@ Never leave `tracesSampleRate: 1.0` hardcoded in production — traffic spikes o
 polling endpoints will burn free quota in hours.
 
 ```ts
-const isProd = process.env.NODE_ENV === "production";
+const isProd = env.MODE === "production"; // or process.env.NODE_ENV === "production"
 
 Sentry.init({
-  dsn: process.env.NEXT_PUBLIC_SENTRY_DSN,
-  enabled: isProd || process.env.NEXT_PUBLIC_OBSERVABILITY_DEBUG === "true",
-  environment: process.env.NEXT_PUBLIC_APP_ENV || process.env.NODE_ENV,
-  release: process.env.NEXT_PUBLIC_GIT_SHA,
+  dsn: env.SENTRY_DSN,
+  enabled: isProd || env.OBSERVABILITY_DEBUG === "true",
+  environment: env.APP_ENV || env.MODE,
+  release: env.GIT_SHA,
 
   // Safe default budgets (override via env var if needed)
   tracesSampleRate: isProd ? 0.1 : 0,
