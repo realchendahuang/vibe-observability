@@ -50,3 +50,24 @@ When conversion drops sharply between Step A and Step B:
 - **High `regenerated` / `negative` feedback on a `prompt_version`**: Diff the
   prompt template and inspect structured error categories (JSON parse failure,
   refusal, context truncation).
+
+## 5. Edge, Self-Hosted Queues & Automation Jobs Diagnostics
+
+- **Cloudflare Workers / D1 / Queues**:
+  - Missing server events -> verify `ctx.waitUntil(ph.shutdown())` wraps every
+    background flush.
+  - Queues DLQ growth -> inspect poison message schema mismatch or upstream
+    timeout; add idempotency keys before replaying DLQ.
+- **Go + Pigsty (`pgmq` / Valkey / RustFS)**:
+  - Rising `pgmq` `oldest_msg_age_sec` with zero Sentry errors -> consumer loop
+    deadlocked, crashed silently, or visibility timeout (`vt`) too short causing
+    infinite redelivery.
+  - Valkey hit ratio drop + rising PG CPU -> missing TTL jitter or key prefix
+    regression after deploy.
+- **Desktop / Native & Python Scrapers**:
+  - Desktop bug reports with zero Sentry events -> request the app's local
+    rotating diagnostic log export (user may be offline or behind a corporate
+    firewall).
+  - Scraper `status: "degraded"` / `zero_items_fetched` -> check `auth_expired`
+    vs `selector_drift` before changing retry logic.
+

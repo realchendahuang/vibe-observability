@@ -17,8 +17,8 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Run unit & skill integrity tests
-        run: python3 -m unittest discover -s tests -v
+      - name: Run full unit, mock-HTTP & skill self-containment tests
+        run: python3 -W error -m unittest discover -s tests -v
 
       - name: Verify install.sh dry-run
         run: bash ./install.sh --target all --dry-run

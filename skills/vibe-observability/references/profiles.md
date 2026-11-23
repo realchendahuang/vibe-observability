@@ -1,44 +1,46 @@
 # Observability Profiles Matrix
 
-Never install overlapping client SDKs blindly. Choose the smallest profile that
-answers the questions the product actually needs.
+Choose the lightest profile that matches the application's runtime and goals.
+Never stack overlapping replay engines or force browser trackers into desktop,
+native, or batch runtimes.
 
 ## Profile Comparison
 
-| Profile | Included Stack | Best For | Why This Combo Works |
+| Profile | Included Stack | Best For | Key Rule |
 | :--- | :--- | :--- | :--- |
-| **`core`** *(default)* | Sentry + PostHog + Backend Logs/Health | SaaS, Indie Web Apps, Mobile-Web MVPs | One product-analytics SDK covers events, funnels, session replay, web analytics, and feature flags; Sentry handles errors, source maps, and APM. Zero overlap. |
-| **`marketing`** | Sentry + GA4 + MS Clarity + Health | Landing pages, SEO/content sites, ad-driven funnels | GA4 integrates natively with Google Ads & Search Console; Clarity gives unlimited free heatmaps and rage-click replays; Sentry catches broken pages/forms. |
-| **`full-deduped`** | Sentry + PostHog *(replay OFF)* + GA4 + MS Clarity *(replay ON)* + Backend Logs/Health | High-growth products needing **both** deep product funnels/A/B tests **and** Google Ads attribution + free unlimited heatmaps | Deduplicates heavy DOM recording: PostHog handles typed events, funnels, retention, flags; Clarity owns visual heatmaps & session replay; GA4 owns acquisition attribution. |
-| **`ai-app`** | `core` + LLM Generation Telemetry (PostHog LLM Analytics / OpenTelemetry / Langfuse) | AI wrappers, copilots, agents, RAG apps | Standard pageviews miss what matters in AI apps: TTFT, token burn per user, model fallback rate, tool-call failures, and thumbs-up/down quality score. |
+| **`core`** *(default Web)* | Sentry + PostHog + Backend Logs & `/health` | React/Vite/TanStack/Hono, Next.js, SaaS, Indie Web Apps | Single product-analytics SDK covers events, funnels, replay & flags; Sentry owns errors & traces. Zero overlap. |
+| **`marketing`** | Sentry + GA4 + MS Clarity + `/health` | Landing pages, SEO/content sites, Google Ads funnels | Maximum free tier for acquisition attribution + heatmaps/rage clicks without heavy product SDKs. |
+| **`full-deduped`** | Sentry + PostHog *(replay OFF)* + GA4 + MS Clarity *(replay ON)* + Backend Logs | Growth products needing **both** deep product funnels/flags **and** Google Ads + unlimited free heatmaps | **MUST** set `disable_session_recording: true` in PostHog and disable Sentry Replay so only Clarity records DOM. |
+| **`ai-app`** | `core` + LLM Generation Telemetry (`$ai_generation`, TTFT, tokens, cost, user feedback) | AI apps, copilots, agents, RAG pipelines | Tracks unit economics (cost/user), latency (`ttft_ms`), upstream rate limits, and prompt-version quality. |
+| **`selfhosted-infra`** | `log/slog` (or Pino) + Sentry + `/metrics` (Prometheus / Pigsty) + Caddy `/ingest` proxy + Queue depth alerts | Go + Gin + Docker + Caddy, Pigsty (PG + `pgmq` + Valkey + RustFS), high-concurrency APIs | Reuse Pigsty's built-in Prometheus + Grafana + Loki for infra/DB/queue metrics; reserve Sentry/PostHog for crashes and product funnel. |
+| **`desktop-native`** | Native Sentry (`@sentry/electron`, `sentry-go`, `sentry` Rust, `sentry-cocoa`/`MetricKit`, `sentry-android`) + Rotating local diagnostic logs + Opt-out PostHog events | Electron, Go + Wails v3 + SQLite, Rust Tauri 2 / Win32, Swift (macOS/iOS), Kotlin (Android) | **NO GA4, NO MS Clarity, NO silent session replay.** Always expose a visible telemetry opt-out toggle and one-click diagnostic log export. |
+| **`batch-jobs`** | `structlog` JSON + Sentry Crons (check-in monitors) + Run Summary & volume-drop anomaly alerts | Python + `uv` scrapers, Ego Lite automation, ETL, scheduled workers | Silent zero-row runs caused by site redesigns or anti-bot walls are deadlier than crashes; monitor output volume & completion heartbeats. |
 
 ## Strict Anti-Patterns
 
-1. **Dual Replay Conflict**: Enabling both PostHog Session Replay and Microsoft
-   Clarity on the same page.
-   - *Fix*: In `full-deduped`, explicitly set `disable_session_recording: true`
-     in `posthog.init(...)` (or omit Clarity and keep PostHog replay).
-2. **Heavy SDKs on Static Docs/Marketing Pages**: Loading full Sentry Replay +
-   PostHog + GA4 + Clarity on a simple waitlist page destroys LCP/INP.
-   - *Fix*: Prefer `marketing` or `core` with deferred script loading.
-3. **Frontend-Only Blindness on Full-Stack Apps**: Shipping an app with Stripe
-   webhooks, auth callbacks, or DB writes using only browser analytics.
-   - *Fix*: Always include structured backend logging + Sentry server SDK +
-     `/api/health` external uptime probe.
-4. **Instrumenting Throwaway Prototypes**: If the user explicitly says this is a
-   local-only throwaway script not going to production, advise skipping external
-   SaaS SDKs and keeping lightweight structured local logs only.
+1. **Dual Replay Conflict**: Enabling PostHog Session Replay and Microsoft
+   Clarity (or Sentry Replay) on the same page.
+2. **Browser Trackers in Desktop/Native Apps**: Installing GA4 or Clarity in
+   Electron, Wails, Tauri, iOS, or Android breaks non-HTTP protocols and triggers
+   privacy backlash.
+3. **Unflushed Serverless/Edge Telemetry**: Calling `posthog-node` or Sentry
+   inside Cloudflare Workers or Lambda without `ctx.waitUntil(...)` / `shutdown()`.
+4. **Paying Twice When Self-Hosting with Pigsty**: Buying expensive hosted APM /
+   log SaaS when Pigsty already runs Prometheus, Grafana, and Loki for PG,
+   `pgmq`, Valkey, and RustFS.
+5. **Over-Instrumenting Throwaway Scripts**: Local one-off scripts should use
+   structured console/file logs only — skip external SaaS SDKs entirely.
 
-## Decision Tree
+## Fast Decision Tree
 
 ```text
-Does the app have real external users / production deploy?
-├─ No  -> Skip external SaaS SDKs; add structured local logging only.
-└─ Yes -> Does it make LLM / AI model calls as a core feature?
-          ├─ Yes -> Start with `ai-app` (or `full-deduped` + LLM events if running heavy Google Ads)
-          └─ No  -> Is it primarily SEO/ads/landing conversion without logged-in workflows?
-                    ├─ Yes -> `marketing`
-                    └─ No  -> Does the user explicitly need GA4/Ads + Clarity heatmaps alongside PostHog?
-                              ├─ Yes -> `full-deduped` (MUST disable PostHog replay)
-                              └─ No  -> `core` (Recommended default)
+What kind of runtime is this?
+├─ Desktop or Native Mobile/OS app -> `desktop-native` (NO GA4/Clarity)
+├─ Data scraper / cron / CLI batch job -> `batch-jobs`
+├─ Go / High-concurrency self-hosted backend (Docker/Caddy/Pigsty) -> `selfhosted-infra` (+ `core` if it also serves a Web UI)
+└─ Web / Full-Stack / Edge app:
+   ├─ Core LLM / Agent feature -> `ai-app`
+   ├─ Pure SEO / landing / ad funnel -> `marketing`
+   ├─ Needs BOTH PostHog funnels/flags AND GA4+Clarity -> `full-deduped` (PostHog replay OFF)
+   └─ Default SaaS / Web app -> `core`
 ```

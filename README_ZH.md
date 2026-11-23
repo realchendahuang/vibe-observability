@@ -5,9 +5,11 @@
 
 [English](./README.md) | [简体中文](./README_ZH.md)
 
-**面向 Vibe Coding 产品的生产级可观测性 Agent Skills：一键接入全链路监控、防坑护栏，并打通“线上数据 → AI 自动诊断修复 → 效果回归”闭环。**
+**彻底框架中立的生产级可观测性 Agent Skills：全栈防坑接入 + 静态审计 + 上线后动态验活 + “左脚踩右脚” AI 数据闭环。**
 
-原生支持 **Antigravity**、**Claude Code**、**Codex**、**Cursor** 及所有兼容开放 `SKILL.md` 规范的 AI 编程代理。
+原生覆盖 **现代 Web 全栈（Vite 8 / React / TanStack / Hono / Better Auth / Oxc）**、**Cloudflare 全家桶（Workers / D1 / KV / Queues / R2）**、**高并发自建基建（Go / Gin / Caddy / Pigsty / Prometheus / `pgmq` / OpenTelemetry）**、**跨平台桌面与原生端（Electron / Wails v3 / Tauri 2 / Swift / Kotlin）**、**SSR 框架（Next.js / Nuxt / SvelteKit / Astro）** 以及 **Python + `uv` 数据抓取与自动化脚本**。
+
+支持 **Antigravity**、**Claude Code**、**Codex**、**Cursor** 及所有兼容开放 `SKILL.md` 规范的 AI 编程代理。
 
 ---
 
@@ -17,84 +19,82 @@ Vibe Coding 让你几小时就能上线一个产品，但也最容易陷入**“
 
 圈内常说：*“让 AI 把 Sentry、PostHog、GA4、Microsoft Clarity 全接上，再把数据喂回给 AI，左脚踩右脚自动优化。”*
 
-方向完全正确，但**如果直接让 AI 无脑把 4 个 SDK 塞进项目，会瞬间踩中 5 个工程深坑**：
+方向完全对，但**如果无脑把 4 个 Web SDK 硬套到每个仓库里，马上会踩爆一堆真实生产大坑**：
 
-| 无脑接入的常见深坑 | `vibe-observability` 的工程化解法 |
+| 常见 Vibe Coding 踩坑 | `vibe-observability` 的工程化解法 |
 | :--- | :--- |
-| **双录屏性能税** — 同时开启 PostHog 录屏 + Clarity + Sentry 录屏，会在浏览器挂多套 DOM MutationObserver，直接拖垮首屏和 Core Web Vitals。 | **互斥套餐分层（Profiles）**：`core` / `marketing` / `full-deduped` / `ai-app`，确保同一页面只启用一套录屏引擎。 |
-| **前端视角盲区** — 接口 502、Stripe Webhook 失败或 SSL 证书过期时，浏览器 JS 根本跑不起来，前端看板一片绿但业务已挂。 | 补齐后端支柱：**结构化 JSON 日志**、`X-Request-Id` 链路关联、`/api/health` 轻探针与外部 Uptime 拨测清单。 |
-| **裸调 SDK 满天飞 & 命名漂移** — 一会儿 `posthog.capture("clickBuy")`，一会儿 `gtag("event", "buy_btn")`，后面 AI 根本没法精准分析。 | 强制生成**类型安全的统一 `telemetry` 抽象层** + `object_action` 埋点词典 + **Sentry ↔ PostHog 跨工具关联**（报错直达录屏）。 |
-| **AdBlock 丢数据、隐私违规与账单爆炸** — 30%–50% 科技用户拦统计脚本；GA4 传邮箱会被封号；一个 `useEffect` 死循环一晚打穿免费额度。 | 内置四重护栏：同源反向代理（`/ingest` + `/monitoring`）、PII 自动脱敏与 `maskAllInputs`、本地 `dev` 隔离、客户端突发限流与采样上限。 |
-| **AI 拍脑袋“伪优化”** — 看着 5 个用户的噪音数据就乱改代码，改完也不知道指标到底涨没涨。 | 配套 **`vibe-observability-loop`** Skill：拉取真实证据 → 关联源码定根因 → 灰度/修复 → 强制产出上线后指标回归与回滚契约。 |
+| **双录屏性能税** — 同时开 PostHog 录屏 + Clarity + Sentry 录屏，多套 DOM Observer 拖垮首屏和 Core Web Vitals。 | **7 档按运行形态互斥的套餐（Profiles）**：确保同一页面绝不重叠两套录屏。 |
+| **跨端/边缘环境错配** — 在 Electron/Wails/Tauri 桌面端塞 GA4/Clarity 会坏协议还遭隐私差评；Cloudflare Workers 漏写 `ctx.waitUntil()` 会导致服务端事件 100% 丢失。 | **6 份按需加载的栈专属适配器**：精准适配 Vite/TanStack/Oxc、Cloudflare Workers、Go/Gin/Caddy/Pigsty、桌面/原生端、Python+`uv` 任务与 SSR 框架。 |
+| **部署态隐形故障** — Auth Middleware 把 `/ingest` 307 重定向到 `/login`，或者 `.js.map` 直接公网泄露源码，静态扫代码根本看不出来。 | 内置 **`verify_live.py`** 上线后 3 秒动态冒烟验活：真发 HTTP 请求查 `/api/health`、`/ingest`、`/monitoring`、CSP 与 `.js.map` 泄露。 |
+| **AdBlock 丢数、隐私违规与账单爆炸** — 30%–50% 科技用户拦统计脚本；GA4 传 PII 封号；一个 `useEffect` 死循环一晚打穿额度。 | 同源反向代理（Hono/Workers、Caddy、框架 rewrites）、严格 PII 脱敏、`oxlint` 禁止业务组件裸导 SDK、客户端突发限流与采样预算。 |
+| **只停留在口号层的 AI 闭环** — 文档喊着“数据喂给 AI”，实际没法一键拉数，改完也不验证是否真涨了。 | 配套 **`vibe-observability-loop`** 内置零依赖只读 **`pull_signals.py`**（一键拉取 Sentry + PostHog HogQL + 本地作业 JSONL）+ MCP 接入指南 + 强制上线回归验效契约。 |
 
 ---
 
-## “左脚踩右脚”数据驱动闭环
+## 全链路闭环
 
 ```mermaid
 flowchart LR
-    A["1. 标准化接入\n(vibe-observability)"] --> B["2. 静态审计验收\n(audit_observability.py)"]
-    B --> C["3. 生产运行采集\n(Sentry + PostHog / GA4 / Clarity + Logs)"]
-    C --> D["4. 拉取真实信号\n(MCP / 快照导出)"]
-    D --> E["5. 归因源码并修复\n(vibe-observability-loop)"]
+    A["1. 按栈标准化接入\n(vibe-observability)"] --> B["2. 静态代码体检\n(audit_observability.py)"]
+    B --> C["3. 部署与动态验活\n(verify_live.py)"]
+    C --> D["4. 拉取真实线上信号\n(pull_signals.py / MCP)"]
+    D --> E["5. 源码归因与手术级修复\n(vibe-observability-loop)"]
     E --> F["6. 上线回归验效\n(指标对比 + Feature Flag)"]
     F --> C
 ```
 
 ---
 
-## 核心组件
+## 内置 3 个零依赖 Python CLI 工具（仅用 Python 3.9+ 标准库）
 
-### 两个互补的 Skills
-
-1. **`skills/vibe-observability`（接入 + 工程护栏 + 验收）**
-   - 自动探测项目技术栈（Next.js、Vite/React/Vue、Node、FastAPI、AI/LLM 应用）。
-   - 自动推荐并落地最合适的互斥套餐（`core` / `marketing` / `full-deduped` / `ai-app`）。
-   - 构建统一类型安全的 `telemetry` 封装层，打通 Sentry ↔ PostHog 录屏跳转、配置 `/ingest` 反向代理与隐私脱敏，补齐后端结构化日志与 `/api/health`。
-   - 运行内置零依赖静态审计脚本 `scripts/audit_observability.py` 做上线前验收。
-
-2. **`skills/vibe-observability-loop`（复盘 + 诊断 + 验效闭环）**
-   - 支持 **MCP 实时直连**（Sentry MCP、PostHog MCP 等）和 **零配置快照粘贴**（报错堆栈、漏斗截图/CSV、Clarity 愤怒点击汇总）。
-   - 按 `影响面 × 商业杠杆 × 置信度 ÷ 成本` 排序，优先处理阻塞登录/支付的 P0 故障和明确交互卡点。
-   - 穿透到源码定位真实根因，输出带防回归测试的修复方案，并给出上线后 24h–7d 的指标验收和回滚阈值。
-
-### 内置零依赖静态审计脚本
-
-纯 Python 3.9+ 标准库实现，可在终端、AI Agent 或 CI 流水线里直接跑：
+### 1. 静态代码审计器（`audit_observability.py`）
+覆盖 16 条高含金量规则（`OBS-001`–`OBS-016`），支持 TS/JS、Vue、Svelte、Go、Python、Rust、Swift、Kotlin、Wrangler、Caddyfile、Oxc：
 
 ```bash
-python3 skills/vibe-observability/scripts/audit_observability.py /path/to/your-app
-# 输出 JSON 并在存在 HIGH/CRITICAL 问题时返回非零退出码：
-python3 skills/vibe-observability/scripts/audit_observability.py /path/to/your-app --json --strict
+python3 skills/vibe-observability/scripts/audit_observability.py /path/to/repo
+python3 skills/vibe-observability/scripts/audit_observability.py /path/to/repo --json --strict
 ```
 
-自动检查项包括：
-- `OBS-001` *(CRITICAL)*：源码硬编码 Sentry Auth Token / DSN / PostHog Key
-- `OBS-002` / `OBS-002B` *(HIGH)*：双录屏冲突（PostHog 录屏 + Clarity / Sentry 录屏重叠）
-- `OBS-003` *(HIGH)*：生产环境硬编码 `tracesSampleRate: 1.0`（账单爆雷风险）
-- `OBS-004` *(HIGH)*：向 GA4 `gtag()` 传 PII 或开启 Sentry `sendDefaultPii: true`
-- `OBS-005` *(MEDIUM)*：PostHog 录屏漏配 `maskAllInputs` 输入脱敏
-- `OBS-006` / `OBS-006B` *(MEDIUM/LOW)*：缺少同源反向代理（`/ingest`）或 Next.js Sentry `tunnelRoute`
-- `OBS-007` *(MEDIUM)*：业务组件多处裸调供应商 SDK，缺少统一抽象层
-- `OBS-008` *(MEDIUM)*：代码引用的可观测性环境变量未写入 `.env.example`
-- `OBS-009` *(LOW)*：PostHog 缺少 `person_profiles: 'identified_only'` 省钱配置
-- `OBS-010` *(LOW)*：检测到后端 API 但缺少 `/api/health` 探针或结构化日志
-- `OBS-011` *(INFO)*：客户端初始化未发现本地开发（dev）隔离开关
+自动揪出：硬编码密钥/DSN、双录屏冲突、`tracesSampleRate: 1.0`、向 GA4 传 PII、缺 `maskAllInputs`/`person_profiles`/`/ingest` 反代、业务组件散落裸调 SDK、漏写 `.env.example`、桌面/原生端误装 GA4/Clarity（`OBS-012`）、Workers/Serverless 漏 `shutdown()/waitUntil()`（`OBS-013`）、Middleware 漏排 `/ingest` 或 `/monitoring`（`OBS-014`）、Source Map 上传后漏删（`OBS-015`）、Cloudflare Workers 误用 `@sentry/node`（`OBS-016`）。
+
+### 2. 上线后动态冒烟验证器（`verify_live.py`）
+专抓部署态才能暴露的惨案：
+
+```bash
+python3 skills/vibe-observability/scripts/verify_live.py https://app.example.com --strict
+```
+
+实时检查：首页可达性与 HTTPS、`/api/health` 或 `/healthz` 延迟、`/ingest/static/array.js` 是否被登录中间件 302/307 拦截或被 SPA 吞成 HTML、`/monitoring` Sentry Tunnel 状态、**公网 `.js.map` 源码泄露（`CRITICAL`）** 以及 CSP 兼容性。
+
+### 3. 只读线上信号拉取器（`pull_signals.py`）
+不强依赖装一堆 MCP，用只读 Token 一键生成紧凑的 AI 诊断简报（绝不打印 Token）：
+
+```bash
+python3 skills/vibe-observability-loop/scripts/pull_signals.py --days 7
+python3 skills/vibe-observability-loop/scripts/pull_signals.py --days 7 --job-history ./logs/runs.jsonl
+```
+
+自动汇总 Sentry 按影响用户数排序的未解决 Top Issues、PostHog HogQL 核心事件与 `$ai_generation` 大模型延迟/Token 消耗，以及本地 Python 抓取任务的静默降级/异常记录。
 
 ---
 
-## 4 档互斥套餐矩阵
+## 7 档运行形态套餐矩阵
 
-| 套餐 | 包含组件 | 适用场景 |
+| 套餐 | 核心组合 | 适用场景 |
 | :--- | :--- | :--- |
-| **`core`** *（默认推荐）* | Sentry + PostHog + 后端日志 & `/health` | SaaS、独立 Web 应用、全栈 MVP |
-| **`marketing`** | Sentry + GA4 + MS Clarity + `/health` | 落地页、SEO 内容站、广告投流漏斗 |
-| **`full-deduped`** | Sentry + PostHog *（关录屏）* + GA4 + MS Clarity *（开录屏/热力图）* + 后端日志 | 既要深度产品漏斗/A/B 测试，又要 Google 广告归因与免费无限热力图的增长期产品 |
-| **`ai-app`** | `core` + LLM 生成遥测（`$ai_generation`、TTFT、Token、成本、用户反馈） | AI 工具、Copilot、Agent、RAG 产品 |
+| **`core`** *（默认 Web）* | Sentry + PostHog + 结构化日志 & `/health` | Vite/React/TanStack/Hono、Next.js/Nuxt、SaaS MVP |
+| **`marketing`** | Sentry + GA4 + MS Clarity + `/health` | 落地页、SEO 内容站、Google 广告投流 |
+| **`full-deduped`** | Sentry + PostHog *（关录屏）* + GA4 + MS Clarity *（开录屏）* + 日志 | 既要产品漏斗/Feature Flag 又要广告归因与免费热力图 |
+| **`ai-app`** | `core` + LLM 生成遥测（`$ai_generation`、TTFT、Token、成本、反馈） | AI 工具、Copilot、Agent、RAG 产品 |
+| **`selfhosted-infra`** | Go `log/slog` + Sentry + `/metrics`（并入 Pigsty Prometheus/Grafana/Loki）+ Caddy `/ingest` + `pgmq` 堆积告警 | 独立服务器、Go + Gin + Docker + Caddy + Pigsty（`pgmq`/Valkey/RustFS） |
+| **`desktop-native`** | 原生崩溃上报（`@sentry/electron` / `sentry-go` / `sentry` Rust / `sentry-cocoa`+`MetricKit` / `sentry-android`）+ 本地滚动诊断日志 + 可关闭匿名事件 | Electron、Wails v3、Tauri 2、Swift（macOS/iOS）、Kotlin（Android）— **严禁 GA4/Clarity** |
+| **`batch-jobs`** | `structlog` JSON + Sentry Crons 死人开关 + Run Summary 与抓取量骤降告警 | Python + `uv` 抓取脚本、Ego Lite 自动化、定时 ETL |
 
 ---
 
 ## 快速安装
+
+`skills/` 下的每个 Skill 目录均**完全自包含**（含参考文档、样板代码与零依赖脚本），拷贝或 CLI 安装均不丢文件。
 
 ### 方式一：Clone 后运行 `install.sh`（推荐）
 
@@ -102,23 +102,16 @@ python3 skills/vibe-observability/scripts/audit_observability.py /path/to/your-a
 git clone https://github.com/realchendahuang/vibe-observability.git
 cd vibe-observability
 
-# 安装到 Antigravity (~/.gemini/config/skills)
+# Antigravity (~/.gemini/config/skills)
 ./install.sh --target antigravity --symlink
 
-# 安装到 Claude Code (~/.claude/skills)
+# Claude Code / Codex / Cursor / 全部全局目录
 ./install.sh --target claude --symlink
-
-# 安装到 Codex (~/.codex/skills)
 ./install.sh --target codex --symlink
-
-# 安装到 Cursor (~/.cursor/skills)
 ./install.sh --target cursor --symlink
-
-# 安装到通用 ~/.agents/skills 或一次性安装到全部全局目录
-./install.sh --target agents --symlink
 ./install.sh --target all --symlink
 
-# 安装到某个具体项目的 .agents/skills 目录
+# 安装到单个项目的 .agents/skills
 ./install.sh --target project --project-dir /path/to/your-app --copy
 ```
 
@@ -127,21 +120,6 @@ cd vibe-observability
 ```bash
 npx skills add realchendahuang/vibe-observability
 ```
-
----
-
-## 常用对话示例
-
-安装后，直接像平时一样跟 AI 说话就会自动触发：
-
-- **新项目一键拉满**：
-  > “帮我用 `vibe-observability` 给这个项目把可观测性拉满，按我们的技术栈选最合适的套餐，接完跑一遍审计脚本验收。”
-- **全量增长套件（自动去重防冲突）**：
-  > “按 `full-deduped` 套餐接入 Sentry、PostHog、GA4 和 MS Clarity，建统一埋点封装层并配好 `/ingest` 反向代理。”
-- **老项目体检排雷**：
-  > “用 `vibe-observability` 审计一下当前仓库的埋点和监控，把隐私、账单和双录屏隐患修掉。”
-- **上线后跑 AI 自动优化闭环**：
-  > “用 `vibe-observability-loop` 分析一下最近的 Sentry 报错和 PostHog 漏斗流失，结合源码定位前 3 个根因并给出带上线验证指标的修复方案。”
 
 ---
 

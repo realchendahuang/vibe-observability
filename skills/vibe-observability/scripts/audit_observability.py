@@ -1,17 +1,24 @@
 #!/usr/bin/env python3
-"""Static observability auditor for Vibe Coding & indie web/full-stack projects.
+"""Static observability auditor for Web, Edge, Backend, Desktop/Native, and Job repos.
 
 Zero external dependencies (Python 3.9+ stdlib only).
 Checks for:
-  - Hardcoded observability keys/tokens in source files
-  - Dual session-replay conflicts (PostHog + Clarity / Sentry Replay overlap)
-  - Unbounded Sentry tracesSampleRate (billing explosion risk)
-  - Potential PII sent to GA4 or Sentry sendDefaultPii=true
-  - Missing PostHog input masking or person_profiles cost guardrail
-  - Direct PostHog ingestion without a first-party reverse proxy
-  - Scattered raw vendor SDK calls instead of a unified telemetry facade
-  - Missing observability env vars in .env.example
-  - Backend missing /health probe or structured logging
+  - OBS-001 (CRITICAL): Hardcoded observability keys/tokens in source files
+  - OBS-002 / 002B (HIGH): Dual session-replay conflicts (PostHog + Clarity / Sentry)
+  - OBS-003 (HIGH): Unbounded Sentry tracesSampleRate (billing explosion risk)
+  - OBS-004 (HIGH): Potential PII sent to GA4 or Sentry sendDefaultPii=true
+  - OBS-005 (MEDIUM): Missing PostHog input masking (`maskAllInputs`)
+  - OBS-006 / 006B (MEDIUM/LOW): Direct ingestion without first-party reverse proxy / tunnel
+  - OBS-007 (MEDIUM): Scattered raw vendor SDK calls instead of a unified telemetry facade
+  - OBS-008 (MEDIUM): Observability env vars missing from `.env.example`
+  - OBS-009 (LOW): PostHog missing `person_profiles: 'identified_only'` cost guardrail
+  - OBS-010 (LOW): Backend missing `/health` probe or structured logger
+  - OBS-011 (INFO): Client init missing dev/test environment opt-out guard
+  - OBS-012 (HIGH): Desktop/Native app includes web-only GA4 or MS Clarity
+  - OBS-013 (HIGH): Serverless/Edge PostHog missing `shutdown()`/`flush()` or `waitUntil()`
+  - OBS-014 (HIGH): Auth middleware likely intercepts `/ingest` or `/monitoring` proxy
+  - OBS-015 (MEDIUM): Sentry build plugin missing sourcemap deletion after upload
+  - OBS-016 (HIGH): Cloudflare Workers importing `@sentry/node` instead of `@sentry/cloudflare`
 """
 
 from __future__ import annotations
@@ -35,6 +42,7 @@ SKIP_DIRS: Set[str] = {
     ".svelte-kit",
     ".vercel",
     ".turbo",
+    ".wrangler",
     "dist",
     "build",
     "out",
@@ -48,6 +56,8 @@ SKIP_DIRS: Set[str] = {
     "vendor",
     "target",
     ".agents",
+    "Pods",
+    ".gradle",
 }
 
 CODE_EXTENSIONS: Set[str] = {
@@ -62,6 +72,10 @@ CODE_EXTENSIONS: Set[str] = {
     ".astro",
     ".py",
     ".go",
+    ".rs",
+    ".swift",
+    ".kt",
+    ".kts",
     ".html",
     ".htm",
 }
@@ -71,12 +85,29 @@ CONFIG_FILENAMES: Set[str] = {
     "pyproject.toml",
     "requirements.txt",
     "go.mod",
+    "Cargo.toml",
+    "Package.swift",
+    "build.gradle",
+    "build.gradle.kts",
     "next.config.js",
     "next.config.mjs",
     "next.config.ts",
+    "nuxt.config.ts",
+    "nuxt.config.js",
     "vite.config.ts",
     "vite.config.js",
+    "vite.config.mts",
+    "wrangler.toml",
+    "wrangler.jsonc",
+    "wrangler.json",
     "vercel.json",
+    "Caddyfile",
+    "wails.json",
+    "tauri.conf.json",
+    ".oxlintrc.json",
+    "oxlint.json",
+    "docker-compose.yml",
+    "docker-compose.yaml",
 }
 
 SEVERITY_RANK: Dict[str, int] = {
@@ -132,10 +163,10 @@ def is_facade_file(rel_path: str) -> bool:
 def is_test_or_example_file(rel_path: str) -> bool:
     lower = rel_path.lower()
     parts = Path(lower).parts
-    if any(p in {"test", "tests", "__tests__", "spec", "specs", "fixtures", "mocks"} for p in parts):
+    if any(p in {"test", "tests", "__tests__", "spec", "specs", "fixtures", "mocks", "e2e"} for p in parts):
         return True
     name = Path(lower).name
-    return ".test." in name or ".spec." in name or name.startswith("test_")
+    return ".test." in name or ".spec." in name or name.startswith("test_") or name.endswith("_test.go")
 
 
 def collect_files(root: Path) -> Tuple[List[Path], List[Path]]:
@@ -148,7 +179,7 @@ def collect_files(root: Path) -> Tuple[List[Path], List[Path]]:
             if filename.endswith(".min.js") or filename.endswith(".map"):
                 continue
             path = Path(dirpath) / filename
-            if filename in CONFIG_FILENAMES:
+            if filename in CONFIG_FILENAMES or filename.startswith("Caddyfile"):
                 config_files.append(path)
             if path.suffix.lower() in CODE_EXTENSIONS:
                 code_files.append(path)
@@ -199,10 +230,19 @@ def audit_project(root: Path) -> Dict[str, object]:
         if Path(rel).suffix.lower() in CODE_EXTENSIONS and not is_test_or_example_file(rel)
     ]
 
+    pkg_json = file_contents.get("package.json", "")
+
     # 1. Detect providers & stack characteristics
     providers: Dict[str, bool] = {
-        "sentry": bool(re.search(r"@sentry/|sentry_sdk|Sentry\.init\(|SENTRY_DSN", all_text)),
-        "posthog": bool(re.search(r"posthog-js|posthog-node|posthog\.init\(|POSTHOG_KEY", all_text)),
+        "sentry": bool(
+            re.search(
+                r"@sentry/|sentry_sdk|getsentry/sentry-go|sentry-cocoa|sentry-android|sentry-tauri|Sentry\.init\(|sentry\.Init\(|sentry_sdk\.init\(|SENTRY_DSN",
+                all_text,
+            )
+        ),
+        "posthog": bool(
+            re.search(r"posthog-js|posthog-node|posthog-ios|posthog-android|posthog\.init\(|POSTHOG_KEY", all_text)
+        ),
         "ga4": bool(
             re.search(
                 r"googletagmanager\.com/gtag|@next/third-parties/google|<GoogleAnalytics|\bgtag\(|GA_MEASUREMENT_ID",
@@ -212,25 +252,49 @@ def audit_project(root: Path) -> Dict[str, object]:
         "clarity": bool(
             re.search(r"@microsoft/clarity|clarity\.ms/tag|CLARITY_PROJECT_ID|Clarity\.init\(", all_text)
         ),
-        "opentelemetry": bool(re.search(r"@opentelemetry/|opentelemetry-api|opentelemetry-sdk", all_text)),
+        "opentelemetry": bool(re.search(r"@opentelemetry/|opentelemetry-api|opentelemetry-sdk|go\.opentelemetry\.io", all_text)),
     }
 
-    has_nextjs = any(
-        Path(rel).name.startswith("next.config.") for rel in file_contents
-    ) or bool(re.search(r'"next"\s*:', file_contents.get("package.json", "")))
+    has_nextjs = any(Path(rel).name.startswith("next.config.") for rel in file_contents) or bool(
+        re.search(r'"next"\s*:', pkg_json)
+    )
+    has_vite = any(Path(rel).name.startswith("vite.config.") for rel in file_contents) or bool(
+        re.search(r'"vite"\s*:', pkg_json)
+    )
+    has_cloudflare_workers = any(
+        Path(rel).name in {"wrangler.toml", "wrangler.jsonc", "wrangler.json"} for rel in file_contents
+    ) or bool(re.search(r"@sentry/cloudflare|@cloudflare/workers-types|ExecutionContext|CF_VERSION_METADATA", all_text))
+    has_go = any(Path(rel).suffix == ".go" or Path(rel).name == "go.mod" for rel in file_contents)
+    has_python = any(Path(rel).suffix == ".py" or Path(rel).name == "pyproject.toml" for rel in file_contents)
+    has_desktop_native = (
+        any(Path(rel).name in {"wails.json", "tauri.conf.json", "Package.swift"} for rel in file_contents)
+        or any(Path(rel).suffix in {".swift", ".kt", ".kts"} for rel in file_contents)
+        or bool(re.search(r'"electron"\s*:|"@tauri-apps/|@sentry/electron|wailsapp/wails', all_text))
+    )
+    has_oxlint = any(Path(rel).name in {".oxlintrc.json", "oxlint.json"} for rel in file_contents) or bool(
+        re.search(r'"oxlint"\s*:', pkg_json)
+    )
 
-    has_backend = bool(
-        re.search(
-            r"FastAPI\(|express\(|fastify\(|new Hono\(|app/api/|pages/api/|uvicorn|gunicorn",
-            all_text,
+    has_backend = (
+        has_cloudflare_workers
+        or has_go
+        or bool(
+            re.search(
+                r"FastAPI\(|express\(|fastify\(|new Hono\(|gin\.Default\(|gin\.New\(|app/api/|pages/api/|uvicorn|gunicorn",
+                all_text,
+            )
         )
-    ) or any(
-        ("/api/" in rel.replace("\\", "/") or rel.replace("\\", "/").startswith("api/") or rel.startswith("server/"))
-        for rel in file_contents
+        or any(
+            ("/api/" in rel.replace("\\", "/") or rel.replace("\\", "/").startswith("api/") or rel.startswith("server/"))
+            for rel in file_contents
+        )
     )
 
     has_structured_logger = bool(
-        re.search(r"\b(pino|winston|structlog|loguru|zerolog|bunyan)\b", all_text)
+        re.search(
+            r"\b(pino|winston|structlog|loguru|zerolog|bunyan|tracing_subscriber|electron-log|OSLog)\b|log/slog|slog\.NewJSONHandler|JSON\.stringify\(\{\s*ts:|observability\s*[:=]\s*\{[^}]*enabled\s*:\s*true",
+            all_text,
+        )
     )
     has_health_route = any(
         re.search(r"healthz?|readyz?", rel, re.IGNORECASE) for rel in file_contents
@@ -257,13 +321,15 @@ def audit_project(root: Path) -> Dict[str, object]:
         )
 
     # OBS-002: Dual session replay conflict
-    # Treat `disable_session_recording` as explicitly handled unless hardcoded to `false`.
     posthog_replay_disabled = bool(
         re.search(r"disable_session_recording\s*:\s*(?!false\b)[^\n,}]+", all_text)
     )
     posthog_replay_always_off = bool(re.search(r"disable_session_recording\s*:\s*true\b", all_text))
     sentry_replay_enabled = bool(
-        re.search(r"replayIntegration\s*\(|replaysSessionSampleRate\s*:\s*0?\.[1-9]|replaysSessionSampleRate\s*:\s*1\b", all_text)
+        re.search(
+            r"replayIntegration\s*\(|replaysSessionSampleRate\s*:\s*0?\.[1-9]|replaysSessionSampleRate\s*:\s*1\b",
+            all_text,
+        )
     )
 
     if providers["posthog"] and providers["clarity"] and not posthog_replay_disabled:
@@ -273,7 +339,7 @@ def audit_project(root: Path) -> Dict[str, object]:
                 severity="HIGH",
                 title="Dual session-replay conflict: PostHog Replay + Microsoft Clarity both active",
                 detail="Running both PostHog Session Replay and Clarity duplicates DOM MutationObservers, hurting LCP/INP and wasting PostHog replay quota.",
-                remediation="Set `disable_session_recording: true` in `posthog.init(...)` when using Clarity (full-deduped profile), or drop Clarity and use PostHog Replay alone (core profile).",
+                remediation="Set `disable_session_recording: true` (or guard dynamically on Clarity ID) in `posthog.init(...)`, or drop Clarity and use PostHog Replay alone.",
                 files=[
                     rel
                     for rel, text in code_only_items
@@ -298,8 +364,7 @@ def audit_project(root: Path) -> Dict[str, object]:
     unbounded_sentry_files: List[str] = []
     for rel, text in code_only_items:
         for line in text.splitlines():
-            if re.search(r"traces(?:SampleRate|_sample_rate)\s*[:=]\s*1(?:\.0)?\b", line):
-                # Ignore lines that explicitly branch by environment inline
+            if re.search(r"(?:tracesSampleRate|TracesSampleRate|traces_sample_rate)\s*[:=]\s*1(?:\.0)?\b", line):
                 if "?" not in line and " if " not in line:
                     unbounded_sentry_files.append(rel)
                     break
@@ -310,7 +375,7 @@ def audit_project(root: Path) -> Dict[str, object]:
                 severity="HIGH",
                 title="Unbounded Sentry tracing sample rate (100%)",
                 detail="Hardcoding `tracesSampleRate: 1.0` can exhaust Sentry free quota or cause unexpected overages during traffic spikes.",
-                remediation="Use an environment-aware sample rate such as `tracesSampleRate: isProd ? 0.1 : 0` (or drive it from an env var).",
+                remediation="Use an environment-aware sample rate such as `0.1` in production and `0` in dev (or drive it from an env var).",
                 files=sorted(set(unbounded_sentry_files)),
             )
         )
@@ -318,9 +383,8 @@ def audit_project(root: Path) -> Dict[str, object]:
     # OBS-004: Potential PII leakage to GA4 / Sentry
     pii_files: List[str] = []
     for rel, text in code_only_items:
-        if re.search(r"sendDefaultPii\s*:\s*true|send_default_pii\s*=\s*True", text):
+        if re.search(r"sendDefaultPii\s*:\s*true|SendDefaultPII\s*:\s*true|send_default_pii\s*=\s*True", text):
             pii_files.append(f"{rel} (Sentry sendDefaultPii=true)")
-        # Look for gtag() payloads containing direct email/phone/password/name keys
         for match in re.finditer(r"gtag\s*\([^;]{0,300}\)", text, re.DOTALL):
             snippet = match.group(0)
             if re.search(r"\b(email|phone|password|full_name|ssn|credit_card)\b\s*:", snippet, re.IGNORECASE):
@@ -338,8 +402,9 @@ def audit_project(root: Path) -> Dict[str, object]:
             )
         )
 
-    # OBS-005: PostHog replay missing input masking
-    if providers["posthog"] and not posthog_replay_always_off:
+    # OBS-005: PostHog replay missing input masking (browser init only)
+    has_browser_posthog = bool(re.search(r"posthog\.init\s*\(", all_text))
+    if has_browser_posthog and not posthog_replay_always_off:
         if not re.search(r"maskAllInputs", all_text):
             findings.append(
                 Finding(
@@ -365,7 +430,7 @@ def audit_project(root: Path) -> Dict[str, object]:
                 severity="MEDIUM",
                 title="PostHog points directly to posthog.com without a first-party reverse proxy",
                 detail="Up to 30–50% of developer and tech-savvy users run AdBlockers that drop requests sent directly to *.posthog.com.",
-                remediation="Route browser ingestion through a neutral same-origin proxy path such as `/ingest` (e.g. via Next.js `rewrites()` or Cloudflare/Nginx proxy).",
+                remediation="Route browser ingestion through a neutral same-origin proxy path such as `/ingest` (via Hono/Workers, Caddy, Nginx, or framework rewrites).",
                 files=sorted(set(direct_ph_files)),
             )
         )
@@ -396,7 +461,7 @@ def audit_project(root: Path) -> Dict[str, object]:
                 severity="MEDIUM",
                 title=f"Raw vendor analytics calls scattered across {len(raw_call_files)} non-facade files",
                 detail="Calling `posthog.capture` or `gtag` directly in UI components causes naming drift, skips burst guards, and makes switching providers painful.",
-                remediation="Consolidate tracking behind a typed `src/lib/telemetry/index.ts` facade with `track()`, `identify()`, `reset()`, and `captureError()`.",
+                remediation="Consolidate tracking behind a typed `telemetry` facade and enforce it via oxlint/ESLint `no-restricted-imports`.",
                 files=sorted(raw_call_files)[:10],
             )
         )
@@ -406,10 +471,18 @@ def audit_project(root: Path) -> Dict[str, object]:
     for rel, text in code_only_items:
         for match in ENV_VAR_PATTERN.finditer(text):
             var = match.group(1)
-            # Only count actual env access patterns nearby or standard prefixes
             if any(
                 token in text
-                for token in (f"process.env.{var}", f"import.meta.env.{var}", f'getenv("{var}")', f"getenv('{var}')", f'environ["{var}"]', f"environ['{var}']")
+                for token in (
+                    f"process.env.{var}",
+                    f"import.meta.env.{var}",
+                    f"env.{var}",
+                    f'getenv("{var}")',
+                    f"getenv('{var}')",
+                    f'Getenv("{var}")',
+                    f'environ["{var}"]',
+                    f"environ['{var}']",
+                )
             ):
                 referenced_env_vars.add(var)
 
@@ -432,18 +505,17 @@ def audit_project(root: Path) -> Dict[str, object]:
         )
 
     # OBS-009: PostHog cost guardrail (person_profiles)
-    if providers["posthog"] and re.search(r"posthog\.init\s*\(", all_text):
-        if "person_profiles" not in all_text:
-            findings.append(
-                Finding(
-                    id="OBS-009",
-                    severity="LOW",
-                    title="PostHog initialization missing `person_profiles: 'identified_only'`",
-                    detail="Without `person_profiles: 'identified_only'`, anonymous bounce visitors can generate costly person profiles.",
-                    remediation="Add `person_profiles: 'identified_only'` to `posthog.init(...)` to significantly cut PostHog event cost.",
-                    files=[rel for rel, text in code_only_items if "posthog.init" in text],
-                )
+    if has_browser_posthog and "person_profiles" not in all_text:
+        findings.append(
+            Finding(
+                id="OBS-009",
+                severity="LOW",
+                title="PostHog initialization missing `person_profiles: 'identified_only'`",
+                detail="Without `person_profiles: 'identified_only'`, anonymous bounce visitors can generate costly person profiles.",
+                remediation="Add `person_profiles: 'identified_only'` to `posthog.init(...)` to significantly cut PostHog event cost.",
+                files=[rel for rel, text in code_only_items if "posthog.init" in text],
             )
+        )
 
     # OBS-010: Backend blind spot (health check & structured logging)
     if has_backend:
@@ -451,7 +523,7 @@ def audit_project(root: Path) -> Dict[str, object]:
         if not has_health_route:
             missing_backend_bits.append("liveness endpoint (/api/health or /healthz)")
         if not has_structured_logger:
-            missing_backend_bits.append("structured JSON logger (e.g. pino / structlog)")
+            missing_backend_bits.append("structured JSON logger (e.g. slog / pino / structlog)")
         if missing_backend_bits:
             findings.append(
                 Finding(
@@ -459,21 +531,24 @@ def audit_project(root: Path) -> Dict[str, object]:
                     severity="LOW",
                     title="Backend observability gap detected",
                     detail=f"Backend/API code detected without: {', '.join(missing_backend_bits)}. Client SDKs cannot report 502s or failed webhooks.",
-                    remediation="Add a fast `/api/health` route for external uptime monitoring and adopt structured JSON logging with `request_id` correlation.",
+                    remediation="Add a fast `/api/health` or `/healthz` route for external uptime monitoring and adopt structured JSON logging with `request_id` correlation.",
                     files=[],
                 )
             )
 
-    # OBS-011: No environment isolation guard detected
+    # OBS-011: No dev-environment guard detected
     any_client_provider = any(providers[k] for k in ("sentry", "posthog", "ga4", "clarity"))
     if any_client_provider:
         init_files = [
             rel
             for rel, text in code_only_items
-            if re.search(r"(Sentry|posthog|Clarity)\.init\s*\(|gtag\s*\(\s*['\"]config['\"]", text)
+            if re.search(r"(?:Sentry|posthog|Clarity)\.init\s*\(|sentry\.Init\(|sentry_sdk\.init\(|gtag\s*\(\s*['\"]config['\"]", text)
         ]
         guarded = any(
-            re.search(r"NODE_ENV|import\.meta\.env\.(PROD|DEV|MODE)|opt_out_capturing|enabled\s*:", file_contents.get(rel, ""))
+            re.search(
+                r"NODE_ENV|APP_ENV|import\.meta\.env\.(PROD|DEV|MODE)|opt_out_capturing|enabled\s*:|env\s*!=\s*\"production\"|app_env\s*!=\s*\"production\"",
+                file_contents.get(rel, ""),
+            )
             for rel in init_files
         )
         if init_files and not guarded:
@@ -483,12 +558,119 @@ def audit_project(root: Path) -> Dict[str, object]:
                     severity="INFO",
                     title="No dev-environment opt-out guard detected in telemetry initialization",
                     detail="Firing telemetry unconditionally on localhost pollutes production funnels and burns error/replay quotas.",
-                    remediation="Disable external reporting unless `NODE_ENV === 'production'` (or an explicit `OBSERVABILITY_DEBUG=true` flag is set).",
+                    remediation="Disable external reporting unless running in production (or an explicit `OBSERVABILITY_DEBUG=true` flag is set).",
                     files=sorted(set(init_files)),
                 )
             )
 
-    # If zero providers detected at all, report cleanly
+    # OBS-012: Desktop / Native app using web-only GA4 or MS Clarity
+    if has_desktop_native and (providers["ga4"] or providers["clarity"]):
+        offenders = [
+            rel
+            for rel, text in code_only_items
+            if re.search(r"googletagmanager|@microsoft/clarity|clarity\.ms|\bgtag\(|Clarity\.init", text)
+        ]
+        findings.append(
+            Finding(
+                id="OBS-012",
+                severity="HIGH",
+                title="Web-only tracker (GA4 / Microsoft Clarity) detected in Desktop/Native app",
+                detail="GA4 and Clarity break on custom app protocols (wails://, tauri://, app://) and trigger user privacy backlash in desktop/native tools.",
+                remediation="Remove GA4 and Clarity; use native crash capture (Sentry / MetricKit), local rotating diagnostic logs, and opt-out anonymous events only.",
+                files=sorted(set(offenders)),
+            )
+        )
+
+    # OBS-013: Serverless / Edge PostHog missing flush/shutdown/waitUntil
+    server_ph_files = [
+        rel
+        for rel, text in code_only_items
+        if re.search(r"posthog-node|new\s+PostHog\s*\(", text)
+    ]
+    if server_ph_files and (has_cloudflare_workers or has_nextjs or "vercel.json" in file_contents):
+        has_flush = any(
+            re.search(r"\.(shutdown|flush)\s*\(|waitUntil\s*\(", file_contents.get(rel, ""))
+            for rel in server_ph_files
+        ) or bool(re.search(r"posthog\.(shutdown|flush)\s*\(", all_text))
+        if not has_flush:
+            findings.append(
+                Finding(
+                    id="OBS-013",
+                    severity="HIGH",
+                    title="Server-side PostHog in Serverless/Edge runtime missing `shutdown()`/`flush()` or `waitUntil()`",
+                    detail="Short-lived isolates (Cloudflare Workers, Vercel/Lambda) freeze immediately after sending the HTTP response, dropping buffered PostHog events.",
+                    remediation="Wrap `posthog.shutdown()` (or capture fetch) inside `ctx.waitUntil(...)` on Workers, or `await posthog.shutdown()` before returning in serverless handlers.",
+                    files=sorted(set(server_ph_files)),
+                )
+            )
+
+    # OBS-014: Middleware potentially intercepting /ingest or /monitoring reverse proxy
+    uses_proxy_paths = bool(re.search(r"""['"]/ingest\b|tunnelRoute\s*:\s*['"]/monitoring['"]""", all_text))
+    if uses_proxy_paths:
+        middleware_files = [
+            (rel, text)
+            for rel, text in code_only_items
+            if Path(rel).stem in {"middleware", "proxy"} and "matcher" in text
+        ]
+        blocking_mw = [
+            rel
+            for rel, text in middleware_files
+            if ("/ingest" in all_text and "ingest" not in text)
+            or ("/monitoring" in all_text and "monitoring" not in text)
+        ]
+        if blocking_mw:
+            findings.append(
+                Finding(
+                    id="OBS-014",
+                    severity="HIGH",
+                    title="Auth/routing middleware matcher does not exclude `/ingest` or `/monitoring`",
+                    detail="If middleware redirects unauthenticated requests to `/login`, first-party PostHog `/ingest` and Sentry `/monitoring` traffic silently dies with 302/307.",
+                    remediation="Exclude `ingest`, `monitoring`, and `api/health` from your middleware `matcher` regex, then confirm with `verify_live.py`.",
+                    files=sorted(set(blocking_mw)),
+                )
+            )
+
+    # OBS-015: Sentry build plugin missing sourcemap deletion after upload
+    sentry_build_files = [
+        rel
+        for rel, text in file_contents.items()
+        if re.search(r"\b(withSentryConfig|sentryVitePlugin)\s*\(", text)
+    ]
+    if sentry_build_files:
+        deletes_maps = any(
+            re.search(r"deleteSourcemapsAfterUpload\s*:\s*true|filesToDeleteAfterUpload", file_contents.get(rel, ""))
+            for rel in sentry_build_files
+        )
+        if not deletes_maps:
+            findings.append(
+                Finding(
+                    id="OBS-015",
+                    severity="MEDIUM",
+                    title="Sentry build plugin does not delete source maps after upload",
+                    detail="Uploading source maps without deleting them from build output can expose your original source code publicly via `.js.map` URLs.",
+                    remediation="Set `sourcemaps: { deleteSourcemapsAfterUpload: true }` (Next.js) or `sourcemaps: { filesToDeleteAfterUpload: ['./dist/**/*.map'] }` (Vite).",
+                    files=sorted(set(sentry_build_files)),
+                )
+            )
+
+    # OBS-016: Cloudflare Workers importing @sentry/node
+    if has_cloudflare_workers:
+        bad_worker_sentry = [
+            rel for rel, text in code_only_items if re.search(r"""['"]@sentry/node['"]""", text)
+        ]
+        if bad_worker_sentry:
+            findings.append(
+                Finding(
+                    id="OBS-016",
+                    severity="HIGH",
+                    title="Cloudflare Workers project imports `@sentry/node` instead of `@sentry/cloudflare`",
+                    detail="`@sentry/node` relies on Node runtime assumptions that break or drop isolate context on Cloudflare Workers.",
+                    remediation="Replace `@sentry/node` with `@sentry/cloudflare` (`Sentry.withSentry(...)`) and enable `nodejs_compat` in Wrangler.",
+                    files=sorted(set(bad_worker_sentry)),
+                )
+            )
+
+    # Zero providers detected
     if not any(providers.values()):
         findings.append(
             Finding(
@@ -496,20 +678,28 @@ def audit_project(root: Path) -> Dict[str, object]:
                 severity="INFO",
                 title="No observability providers detected yet",
                 detail="This repository does not appear to have Sentry, PostHog, GA4, Clarity, or OpenTelemetry configured yet.",
-                remediation="Select a profile (`core`, `marketing`, `full-deduped`, or `ai-app`) and run the `vibe-observability` setup workflow.",
+                remediation="Select a profile matching your runtime (`core`, `marketing`, `full-deduped`, `ai-app`, `selfhosted-infra`, `desktop-native`, or `batch-jobs`) and follow `vibe-observability`.",
                 files=[],
             )
         )
 
     findings.sort(key=lambda f: (-SEVERITY_RANK[f.severity], f.id))
-    score = max(0, 100 - sum(SEVERITY_PENALTY[f.severity] for f in findings))
+    instrumented = any(providers.values())
+    score = max(0, 100 - sum(SEVERITY_PENALTY[f.severity] for f in findings)) if instrumented else None
 
     return {
         "project_root": str(root),
         "files_scanned": len(file_contents),
+        "instrumented": instrumented,
         "detected_providers": [k for k, v in providers.items() if v],
         "detected_stack": {
+            "vite": has_vite,
             "nextjs": has_nextjs,
+            "cloudflare_workers": has_cloudflare_workers,
+            "go_backend": has_go,
+            "python": has_python,
+            "desktop_native": has_desktop_native,
+            "oxlint": has_oxlint,
             "backend": has_backend,
             "structured_logger": has_structured_logger,
             "health_route": has_health_route,
@@ -528,17 +718,16 @@ def render_markdown_report(report: Dict[str, object]) -> str:
     providers = report["detected_providers"] or ["(none)"]
     stack = report["detected_stack"]
     summary = report["summary"]
+    active_stack = [k for k, v in stack.items() if v]
+    score_str = f"{report['score']}/100" if report["score"] is not None else "N/A (not instrumented yet)"
 
     lines.append(f"Vibe Observability Audit — {report['project_root']}")
     lines.append("=" * 68)
     lines.append(f"Files scanned : {report['files_scanned']}")
     lines.append(f"Providers     : {', '.join(providers)}")
+    lines.append(f"Stack hints   : {', '.join(active_stack) if active_stack else '(generic)'}")
     lines.append(
-        f"Stack hints   : nextjs={stack['nextjs']}, backend={stack['backend']}, "
-        f"structured_logger={stack['structured_logger']}, health_route={stack['health_route']}"
-    )
-    lines.append(
-        f"Score         : {report['score']}/100  "
+        f"Score         : {score_str}  "
         f"(CRITICAL={summary['CRITICAL']} HIGH={summary['HIGH']} "
         f"MEDIUM={summary['MEDIUM']} LOW={summary['LOW']} INFO={summary['INFO']})"
     )
@@ -562,7 +751,7 @@ def render_markdown_report(report: Dict[str, object]) -> str:
 
 def main(argv: List[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Audit a repository's observability setup for common vibe-coding pitfalls."
+        description="Audit a repository's observability setup across Web, Edge, Backend, Desktop/Native, and Job stacks."
     )
     parser.add_argument("path", nargs="?", default=".", help="Path to the project root (default: current directory)")
     parser.add_argument("--json", action="store_true", dest="as_json", help="Emit JSON output for AI agents / CI")

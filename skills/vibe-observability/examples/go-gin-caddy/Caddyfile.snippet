@@ -1,0 +1,33 @@
+# Caddy reverse-proxy snippet for Go + Gin + PostHog first-party ingestion
+#
+# Benefits:
+# - Zero application code needed for PostHog AdBlock bypass (/ingest/*)
+# - Strips auth cookies before forwarding to PostHog
+# - Keeps internal Prometheus /metrics blocked from public internet
+
+app.example.com {
+    # Block internal Prometheus scrape endpoint from public access
+    @internal_metrics path /metrics
+    respond @internal_metrics 403
+
+    # First-party PostHog static assets proxy
+    handle_path /ingest/static/* {
+        reverse_proxy https://us-assets.i.posthog.com {
+            header_up Host us-assets.i.posthog.com
+            header_up -Cookie
+        }
+    }
+
+    # First-party PostHog event ingestion proxy
+    handle_path /ingest/* {
+        reverse_proxy https://us.i.posthog.com {
+            header_up Host us.i.posthog.com
+            header_up -Cookie
+        }
+    }
+
+    # Application traffic -> Go + Gin service
+    handle {
+        reverse_proxy app:8080
+    }
+}

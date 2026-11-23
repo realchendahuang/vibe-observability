@@ -1,6 +1,7 @@
 import os
 import re
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -14,7 +15,7 @@ MD_LINK_RE = re.compile(r"\[[^\]]+\]\((\./[^)#]+)(?:#[^)]+)?\)")
 
 
 class TestSkillsIntegrity(unittest.TestCase):
-    def test_all_skills_have_valid_frontmatter_and_links(self) -> None:
+    def test_all_skills_are_self_contained_with_valid_frontmatter_and_links(self) -> None:
         skill_dirs = sorted(p for p in SKILLS_DIR.iterdir() if p.is_dir())
         self.assertGreaterEqual(len(skill_dirs), 2)
 
@@ -32,13 +33,26 @@ class TestSkillsIntegrity(unittest.TestCase):
             self.assertEqual(name_match.group(1), skill_dir.name)
             self.assertIn("description:", fm, f"Missing description in {skill_md}")
 
-            # Verify every relative markdown link resolves cleanly
+            # Verify every relative markdown link stays inside skill_dir and resolves cleanly
             for rel_target in MD_LINK_RE.findall(content):
                 resolved = (skill_dir / rel_target).resolve()
+                self.assertTrue(resolved.exists(), f"Broken link {rel_target} in {skill_md}")
                 self.assertTrue(
-                    resolved.exists(),
-                    f"Broken link {rel_target} in {skill_md}",
+                    resolved.is_relative_to(skill_dir.resolve()),
+                    f"Skill {skill_dir.name} links outside its self-contained directory: {rel_target}",
                 )
+
+            # Verify every Python CLI in scripts/ executes --help cleanly
+            scripts_dir = skill_dir / "scripts"
+            if scripts_dir.is_dir():
+                for py_script in sorted(scripts_dir.glob("*.py")):
+                    res = subprocess.run(
+                        [sys.executable, str(py_script), "--help"],
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                    )
+                    self.assertEqual(res.returncode, 0, f"{py_script} --help failed: {res.stderr}")
 
     def test_install_and_uninstall_in_sandbox_home(self) -> None:
         with tempfile.TemporaryDirectory() as fake_home:
@@ -62,6 +76,8 @@ class TestSkillsIntegrity(unittest.TestCase):
                     self.assertTrue((installed / "SKILL.md").is_file())
                     if mode == "--symlink":
                         self.assertTrue(installed.is_symlink())
+                # Verify self-contained examples copied along with skill
+                self.assertTrue((dest_root / "vibe-observability" / "examples").is_dir())
 
                 res_uninstall = subprocess.run(
                     ["bash", str(INSTALL_SCRIPT), "--target", "antigravity", "--uninstall"],
